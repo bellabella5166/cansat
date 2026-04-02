@@ -53,4 +53,4 @@ else:
 
     print("\n✅ 모든 데이터 처리가 완료되었습니다.")
 
-print("사실 나는 temp야")
+print("사실 나는 dev야")
