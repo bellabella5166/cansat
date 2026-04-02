@@ -52,5 +52,3 @@ else:
                 print(f"[데이터 {row['Index']}] Raw: {raw_temp_str} -> 생성된 패킷: {packet.hex()} -> 복원된 온도: {parsed_temp}°C")
 
     print("\n✅ 모든 데이터 처리가 완료되었습니다.")
-
-print("사실 나는 dev야")
