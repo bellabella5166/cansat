@@ -15,3 +15,4 @@ if laplacian_score > 100:
     print("판단 : 선명한 이미지")
 else:
     print("판단 : 흐린 이미지")
+
