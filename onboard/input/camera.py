@@ -71,7 +71,7 @@ class Camera:
             return image, timestamp, save_path
 
         except Exception as e:
-            print(f"[Camera] 캡처 오류: {e}")
+            print(f"[Camera] capture error: {e}")
             return None, timestamp, None
 
     def close(self):

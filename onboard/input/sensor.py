@@ -1,6 +1,7 @@
 import os
 import csv
 import numpy as np
+import time
 from onboard.input.timestamp_manager import get_timestamp, format_timestamp
 from onboard.config import (
     MOCK_MODE,
@@ -55,6 +56,7 @@ class Sensor:
         self.raw_csv_path = os.path.join(self.save_dir, "raw_sensor_log.csv")
         self._init_csv()
 
+        self._mock_start_time = time.monotonic()
         if not self.mock:
             self._init_sensors()
 
@@ -67,7 +69,12 @@ class Sensor:
                     'sensor_id', 'timestamp',
                     'lat', 'lon', 'gps_altitude',
                     'roll', 'pitch', 'yaw',
-                    'pressure', 'temp', 'baro_altitude'
+                    'pressure', 'temp', 'baro_altitude',
+                    'accel_x', 'accel_y', 'accel_z',
+                    'gyro_x', 'gyro_y', 'gyro_z',
+                    'satellites', 'fix_quality', 'hdop',
+                    'satellites', 'fix_quality', 'hdop',
+                    'calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag'
                 ])
 
     def _init_sensors(self):
@@ -84,13 +91,31 @@ class Sensor:
         # GPS 초기화
         self.gps = serial.Serial(GPS_PORT, baudrate=GPS_BAUDRATE, timeout=1)
 
+        # 발사 지점 기준 고도 저장 (10회 평균)
+        samples = [self.baro.altitude for _ in range(10)]
+        self.ground_altitude = sum(samples) / len(samples)
+        print(f"[Sensor] Ground altitude set: {self.ground_altitude:.2f} m")
+
     def _read_imu(self) -> dict:
-        """BNO055에서 roll, pitch, yaw 읽기"""
         euler = self.imu.euler
+        accel = self.imu.linear_acceleration  # (x, y, z) m/s²
+        gyro  = self.imu.gyro                 # (x, y, z) rad/s → °/s 변환 필요 여부 확인
+
+        # calib 상태 확인 (0~3, 3이 완전 교정)
+        calib = self.imu.calibration_status  # (sys, gyro, accel, mag)
+        if any(v < 1 for v in calib):
+            print(f"[Sensor] WARNING BNO055 calib low: sys={calib[0]}, gyro={calib[1]}, accel={calib[2]}, mag={calib[3]}")
+
         return {
-            'roll': euler[2] if euler[2] is not None else 0.0,
-            'pitch': euler[1] if euler[1] is not None else 0.0,
-            'yaw': euler[0] if euler[0] is not None else 0.0,
+            'roll':    euler[2] if euler[2] is not None else 0.0,
+            'pitch':   euler[1] if euler[1] is not None else 0.0,
+            'yaw':     euler[0] if euler[0] is not None else 0.0,
+            'accel_x': accel[0] if accel[0] is not None else 0.0,
+            'accel_y': accel[1] if accel[1] is not None else 0.0,
+            'accel_z': accel[2] if accel[2] is not None else 0.0,
+            'gyro_x':  gyro[0]  if gyro[0]  is not None else 0.0,
+            'gyro_y':  gyro[1]  if gyro[1]  is not None else 0.0,
+            'gyro_z':  gyro[2]  if gyro[2]  is not None else 0.0,
         }
 
     def _read_baro(self) -> dict:
@@ -98,14 +123,14 @@ class Sensor:
         return {
             'pressure': self.baro.pressure,
             'temp': self.baro.temperature,
-            'baro_altitude': self.baro.altitude,
+            'baro_altitude': self.baro.altitude - self.ground_altitude,  # 상대 고도
         }
 
     def _read_gps(self) -> dict:
         """GPS에서 lat, lon, altitude 읽기"""
         try:
             line = self.gps.readline().decode('ascii', errors='replace')
-            if line.startswith('$GPGGA'):
+            if line.startswith('$GPGGA') or line.startswith('$GNGGA'):
                 msg = pynmea2.parse(line)
                 return {
                     'lat': float(msg.latitude),
@@ -118,16 +143,31 @@ class Sensor:
 
     def _mock_data(self) -> dict:
         """Mock 센서 데이터 생성 (로컬 테스트용)"""
+        elapsed  = time.monotonic() - self._mock_start_time
+        baro_alt = max(0.0, 350.0 - elapsed * 5.0)
         return {
             'lat': 37.5 + np.random.uniform(-0.001, 0.001),
             'lon': 127.0 + np.random.uniform(-0.001, 0.001),
-            'gps_altitude': 350.0 + np.random.uniform(-5.0, 5.0),
+            'gps_altitude': baro_alt + np.random.uniform(-2.0, 2.0),
             'roll': np.random.uniform(-5.0, 5.0),
             'pitch': np.random.uniform(-5.0, 5.0),
             'yaw': np.random.uniform(0.0, 360.0),
             'pressure': 1013.25 + np.random.uniform(-1.0, 1.0),
             'temp': 25.0 + np.random.uniform(-1.0, 1.0),
-            'baro_altitude': 350.0 + np.random.uniform(-5.0, 5.0),
+            'baro_altitude': baro_alt + np.random.uniform(-1.0, 1.0),
+            'accel_x': np.random.uniform(-1.0, 1.0),
+            'accel_y': np.random.uniform(-1.0, 1.0),
+            'accel_z': np.random.uniform(9.7, 9.9),
+            'gyro_x': np.random.uniform(-1.0, 1.0),
+            'gyro_y': np.random.uniform(-1.0, 1.0),
+            'gyro_z': np.random.uniform(-1.0, 1.0),
+            'satellites': int(np.random.randint(4, 12)),
+            'fix_quality': 1,
+            'hdop': float(np.random.uniform(0.8, 2.0)),
+            'calib_sys':   3,
+            'calib_gyro':  3,
+            'calib_accel': 3,
+            'calib_mag':   3
         }
 
     def read(self, sensor_id: str) -> tuple:
@@ -159,16 +199,23 @@ class Sensor:
                     sensor_id, timestamp,
                     data['lat'], data['lon'], data['gps_altitude'],
                     data['roll'], data['pitch'], data['yaw'],
-                    data['pressure'], data['temp'], data['baro_altitude']
+                    data['pressure'], data['temp'], data['baro_altitude'],
+                    data['accel_x'], data['accel_y'], data['accel_z'],
+                    data['gyro_x'], data['gyro_y'], data['gyro_z'],
+                    data['satellites'], data['fix_quality'], data['hdop'],
+                    data.get('calib_sys', 3), data.get('calib_gyro', 3),
+                    data.get('calib_accel', 3), data.get('calib_mag', 3)
                 ])
 
             return data, timestamp
 
         except Exception as e:
-            print(f"[Sensor] 수집 오류: {e}")
+            print(f"[Sensor] collection error: {e}")
             return None, timestamp
 
     def close(self):
         """센서 자원 해제"""
         if self.gps is not None:
             self.gps.close()
+
+            

@@ -53,5 +53,5 @@ class ImagePreprocess:
             return normalized
 
         except Exception as e:
-            print(f"[ImagePreprocess] ❌ 전처리 오류: {e}")
+            print(f"[ImagePreprocess] ❌ preprocess error: {e}")
             return None

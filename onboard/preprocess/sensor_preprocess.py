@@ -29,7 +29,7 @@ class SensorPreprocess:
         """
     
         if data is None:
-            print("[SensorPreprocess] ❌ 입력 데이터 None")
+            print("[SensorPreprocess] ❌ input data None")
             return None
 
         try:
@@ -39,28 +39,40 @@ class SensorPreprocess:
             # 2. low-pass filter 적용
             filtered = self._low_pass_filter(cleaned)
 
+            # 3. timestamp 추가
+            filtered['timestamp'] = timestamp
+
             return filtered
 
         except Exception as e:
-            print(f"[SensorPreprocess] ❌ 전처리 오류: {e}")
+            print(f"[SensorPreprocess] ❌ preprocess error: {e}")
             return None
         
 
     def _remove_outliers(self, data: dict) -> dict:
-        """
-        센서 데이터 이상치를 제거한다.
-        각 센서값의 물리적 범위를 벗어난 값을 클리핑한다.
-        """
         cleaned = data.copy()
+        # GPS
         cleaned['lat'] = float(np.clip(data['lat'], -90.0, 90.0))
         cleaned['lon'] = float(np.clip(data['lon'], -180.0, 180.0))
         cleaned['gps_altitude'] = float(np.clip(data['gps_altitude'], -500.0, 50000.0))
+        # IMU
         cleaned['roll'] = float(np.clip(data['roll'], -180.0, 180.0))
         cleaned['pitch'] = float(np.clip(data['pitch'], -90.0, 90.0))
         cleaned['yaw'] = float(np.clip(data['yaw'], 0.0, 360.0))
+        cleaned['accel_x'] = float(np.clip(data['accel_x'], -156.9, 156.9))
+        cleaned['accel_y'] = float(np.clip(data['accel_y'], -156.9, 156.9))
+        cleaned['accel_z'] = float(np.clip(data['accel_z'], -156.9, 156.9))
+        cleaned['gyro_x'] = float(np.clip(data['gyro_x'], -2000.0, 2000.0))
+        cleaned['gyro_y'] = float(np.clip(data['gyro_y'], -2000.0, 2000.0))
+        cleaned['gyro_z'] = float(np.clip(data['gyro_z'], -2000.0, 2000.0))
+        # Barometer
         cleaned['pressure'] = float(np.clip(data['pressure'], 300.0, 1100.0))
         cleaned['temp'] = float(np.clip(data['temp'], -40.0, 85.0))
         cleaned['baro_altitude'] = float(np.clip(data['baro_altitude'], -500.0, 50000.0))
+        # GPS 품질 (필터링 불필요)
+        cleaned['satellites'] = int(data.get('satellites', 0))
+        cleaned['fix_quality'] = int(data.get('fix_quality', 0))
+        cleaned['hdop'] = float(np.clip(data.get('hdop', 0.0), 0.0, 99.9))
         return cleaned
 
     def _low_pass_filter(self, data: dict) -> dict:
@@ -73,9 +85,15 @@ class SensorPreprocess:
             return data.copy()
 
         filtered = {}
+        int_keys = ['satellites', 'fix_quality']
+        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag']
+
         for key, value in data.items():
-            if isinstance(value, (int, float)):
-                filtered[key] = self.alpha * value + (1 - self.alpha) * self._prev.get(key, value)
+            if key in skip_keys:
+                filtered[key] = value  # 필터 미적용, 원본 그대로
+            elif isinstance(value, (int, float)):
+                new_val = self.alpha * value + (1 - self.alpha) * self._prev.get(key, value)
+                filtered[key] = int(round(new_val)) if key in int_keys else new_val
             else:
                 filtered[key] = value
 

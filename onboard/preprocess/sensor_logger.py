@@ -25,23 +25,17 @@ class SensorLogger:
                 writer = csv.writer(f)
                 writer.writerow([
                     'timestamp',
-                    'lat', 'lon', 'gps_altitude',
+                    'lat', 'lon', 'gps_altitude', 'baro_altitude',
                     'roll', 'pitch', 'yaw',
-                    'pressure', 'temp', 'baro_altitude'
+                    'accel_x', 'accel_y', 'accel_z',
+                    'gyro_x', 'gyro_y', 'gyro_z',
+                    'pressure', 'temp',
+                    'satellites', 'fix_quality', 'hdop'
                 ])
 
     def log(self, data: dict) -> bool:
-        """
-        전처리된 센서 데이터를 CSV에 저장한다.
-
-        Args:
-            data (dict): 전처리된 센서 데이터 (timestamp 포함)
-
-        Returns:
-            bool: 저장 성공 시 True, 실패 시 False
-        """
         if data is None:
-            print("[SensorLogger] ❌ 입력 데이터 None")
+            print("[SensorLogger] ❌ input data None")
             return False
 
         try:
@@ -49,12 +43,15 @@ class SensorLogger:
                 writer = csv.writer(f)
                 writer.writerow([
                     data['timestamp'],
-                    data['lat'], data['lon'], data['gps_altitude'],
+                    data['lat'], data['lon'], data['gps_altitude'], data['baro_altitude'],
                     data['roll'], data['pitch'], data['yaw'],
-                    data['pressure'], data['temp'], data['baro_altitude']
+                    data['accel_x'], data['accel_y'], data['accel_z'],
+                    data['gyro_x'], data['gyro_y'], data['gyro_z'],
+                    data['pressure'], data['temp'],
+                    data['satellites'], data['fix_quality'], data['hdop']
                 ])
             return True
 
         except Exception as e:
-            print(f"[SensorLogger] ❌ 저장 오류: {e}")
+            print(f"[SensorLogger] ❌ save error: {e}")
             return False

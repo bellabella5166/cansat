@@ -29,7 +29,7 @@ CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값
 # ===== 통신 설정 =====
 XBEE_PORT = "/dev/ttyUSB0"    # XBee 포트 (Pi4 기준)
 XBEE_BAUDRATE = 9600          # XBee 보드레이트
-CHUNK_SIZE = 128              # 이미지 chunk 크기 (bytes)
+MAX_RETRY = 5                 # 최대 재전송 횟수
 
 # ===== 대표 이미지 설정 =====
 REPRESENTATIVE_SIZE = (320, 240)  # 대표 이미지 축소 크기

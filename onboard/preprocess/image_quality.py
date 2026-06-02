@@ -31,26 +31,32 @@ class ImageQuality:
         laplacian_score = cv2.Laplacian(gray, cv2.CV_64F).var()
 
         if laplacian_score < LAPLACIAN_THRESHOLD:
-            print(f"[ImageQuality] ❌ 블러 감지: laplacian_score={laplacian_score:.2f}")
+            print(f"[ImageQuality] ❌ blur detection: laplacian_score={laplacian_score:.2f}")
             return False, laplacian_score
 
         # 2. 노출 이상 감지
         mean_brightness = gray.mean()
         if mean_brightness < EXPOSURE_LOW:
-            print(f"[ImageQuality] ❌ 노출 부족: brightness={mean_brightness:.2f}")
+            print(f"[ImageQuality] ❌ brightness lack: brightness={mean_brightness:.2f}")
             return False, laplacian_score
 
         if mean_brightness > EXPOSURE_HIGH:
-            print(f"[ImageQuality] ❌ 노출 과다: brightness={mean_brightness:.2f}")
+            print(f"[ImageQuality] ❌ brightness excess : brightness={mean_brightness:.2f}")
+            return False, laplacian_score
+        
+        # 3. calib 신뢰도 체크
+        calib_sys = imu.get('calib_sys', 3)
+        if calib_sys < 1:
+            print(f"[ImageQuality] ❌ IMU calib unreliable: calib_sys={calib_sys}")
             return False, laplacian_score
 
-        # 3. 자세각 감지 (IMU 융합)
+        # 4. 자세각 감지 (IMU 융합)
         roll = abs(imu.get('roll', 0.0))
         pitch = abs(imu.get('pitch', 0.0))
 
         if roll > ATTITUDE_THRESHOLD or pitch > ATTITUDE_THRESHOLD:
-            print(f"[ImageQuality] ❌ 자세각 초과: roll={roll:.2f}, pitch={pitch:.2f}")
+            print(f"[ImageQuality] ❌ IMU excess: roll={roll:.2f}, pitch={pitch:.2f}")
             return False, laplacian_score
 
-        print(f"[ImageQuality] ✅ 품질 통과: laplacian={laplacian_score:.2f}, brightness={mean_brightness:.2f}, roll={roll:.2f}, pitch={pitch:.2f}")
+        print(f"[ImageQuality] ✅ quality pass: laplacian={laplacian_score:.2f}, brightness={mean_brightness:.2f}, roll={roll:.2f}, pitch={pitch:.2f}")
         return True, laplacian_score
