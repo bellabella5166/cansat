@@ -1,0 +1,19 @@
+# ── 온보드 (Raspberry Pi 4) requirements ──
+# pip install -r requirements.txt --break-system-packages
+
+# 핵심
+numpy>=2.0.0
+opencv-python>=4.13.0
+pillow>=12.0.0
+pyserial>=3.5
+
+# 센서 (Pi4에서만 설치)
+smbus2>=0.6.0
+spidev>=3.8
+pynmea2>=1.19.0
+
+# AI 추론
+onnxruntime>=1.26.0
+
+# 나중에 필요 (YOLO 학습 완료 후)
+# ultralytics>=8.0
