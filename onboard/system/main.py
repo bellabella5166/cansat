@@ -39,7 +39,7 @@ from onboard.detection.representative_selector import RepresentativeSelector
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 from onboard.config import (
-    MOCK_MODE,
+    MOCK_MODE,COMM_MOCK,
     IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR,
     XBEE_PORT, XBEE_BAUDRATE,
     CAMERA_FPS,
@@ -382,7 +382,7 @@ def main():
         def __enter__(self): return self
         def __exit__(self, *_): pass
 
-    serial = MockSerial() if MOCK_MODE else None
+    serial = MockSerial() if (MOCK_MODE and COMM_MOCK) else None
 
     def _run(serial):
         threads = [
@@ -429,7 +429,7 @@ def main():
 
     seq = SeqCounter()
 
-    if MOCK_MODE:
+    if COMM_MOCK:
         _run(serial)
     else:
         with XBeeSerial(XBEE_PORT, XBEE_BAUDRATE) as serial:

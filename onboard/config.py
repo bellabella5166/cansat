@@ -1,7 +1,8 @@
 # onboard/config.py
 
 # ===== 실행 모드 =====
-MOCK_MODE = True  # 로컬 테스트: True / Pi4 실제 실행: False
+MOCK_MODE = True
+COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
 
 # ===== 저장 경로 =====
 DATA_DIR = "data"
