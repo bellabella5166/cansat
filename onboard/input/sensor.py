@@ -73,7 +73,6 @@ class Sensor:
                     'accel_x', 'accel_y', 'accel_z',
                     'gyro_x', 'gyro_y', 'gyro_z',
                     'satellites', 'fix_quality', 'hdop',
-                    'satellites', 'fix_quality', 'hdop',
                     'calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag'
                 ])
 

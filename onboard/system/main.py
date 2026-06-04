@@ -39,11 +39,12 @@ from onboard.detection.representative_selector import RepresentativeSelector
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 from onboard.config import (
-    MOCK_MODE,COMM_MOCK,
+    MOCK_MODE,
     IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR,
     XBEE_PORT, XBEE_BAUDRATE,
     CAMERA_FPS,
     MAX_RETRY,
+    ALTITUDE_TRIGGER,
 )
 
 # ── 로깅 ──────────────────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ def image_loop(camera: Camera, validator: ImageValidator,
 
             # ★ 고도 150m 이하 도달 시 대표 이미지 선별 및 전송 (1회만)
             baro_alt = imu.get("baro_altitude", 9999.0)
-            if not rep_sent and baro_alt <= 150.0:
+            if not rep_sent and baro_alt <= ALTITUDE_TRIGGER:
                 rep_img, rep_id = selector.select()
                 if rep_img is not None:
                     rep_id_u16 = id_mgr.get_image_id_uint16()

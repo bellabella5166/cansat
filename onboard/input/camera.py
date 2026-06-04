@@ -3,6 +3,7 @@ import numpy as np
 import os
 from onboard.input.timestamp_manager import get_timestamp, format_timestamp
 from onboard.config import MOCK_MODE, CAMERA_RESOLUTION, IMAGE_SAVE_DIR
+import time
 
 # Pi4 환경에서만 picamera2 import 가능함.
 try:
@@ -41,6 +42,7 @@ class Camera:
         )
         self.camera.configure(config)
         self.camera.start()
+        time.sleep(2)
 
     def capture(self, image_id: str) -> tuple:
         """
