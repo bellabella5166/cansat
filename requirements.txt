@@ -9,11 +9,10 @@ pyserial>=3.5
 
 # 센서 (Pi4에서만 설치)
 smbus2>=0.6.0
-spidev>=3.8
 pynmea2>=1.19.0
 
 # AI 추론
 onnxruntime>=1.26.0
 
 # 나중에 필요 (YOLO 학습 완료 후)
-# ultralytics>=8.0
+ultralytics>=8.0
