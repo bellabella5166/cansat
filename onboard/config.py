@@ -42,4 +42,7 @@ GPS_BAUDRATE = 9600          # GPS 보드레이트
 
 # ===== 센서 전처리 설정 =====
 SENSOR_LOWPASS_ALPHA = 0.2    # low-pass filter 계수 (0~1)
+# ===== GPS 필터링 설정 =====
+GPS_MAX_SPEED = 3.0   # Maximum GPS speed (m/s)
+GPS_MAX_HDOP = 3.0    # Maximum HDOP threshold
 

@@ -1,5 +1,6 @@
 import numpy as np
-from onboard.config import SENSOR_LOWPASS_ALPHA
+import math
+from onboard.config import SENSOR_LOWPASS_ALPHA, GPS_MAX_SPEED, GPS_MAX_HDOP
 
 
 class SensorPreprocess:
@@ -14,6 +15,7 @@ class SensorPreprocess:
         """
         self.alpha = alpha
         self._prev = None  # 이전 필터링 결과 저장
+        self._prev_gps = None  # 이전 GPS 좌표 저장
 
     def process(self, data: dict, timestamp: float) -> dict:
         """
@@ -35,6 +37,8 @@ class SensorPreprocess:
         try:
             # 1. 이상치 제거
             cleaned = self._remove_outliers(data)
+            if cleaned is None:
+                return None
 
             # 2. low-pass filter 적용
             filtered = self._low_pass_filter(cleaned)
@@ -51,10 +55,37 @@ class SensorPreprocess:
 
     def _remove_outliers(self, data: dict) -> dict:
         cleaned = data.copy()
-        # GPS
-        cleaned['lat'] = float(np.clip(data['lat'], -90.0, 90.0))
-        cleaned['lon'] = float(np.clip(data['lon'], -180.0, 180.0))
-        cleaned['gps_altitude'] = float(np.clip(data['gps_altitude'], -500.0, 50000.0))
+        # GPS fix_quality/hdop 기반 필터링
+        if data.get('fix_quality', 0) == 0:
+            print("[SensorPreprocess] GPS fix not available, skipping GPS")
+            cleaned['lat'] = self._prev_gps[0] if self._prev_gps else 0.0
+            cleaned['lon'] = self._prev_gps[1] if self._prev_gps else 0.0
+            cleaned['gps_altitude'] = data['gps_altitude']
+        elif data.get('hdop', 99.0) > GPS_MAX_HDOP:
+            print("[SensorPreprocess] GPS hdop too high, skipping GPS")
+            cleaned['lat'] = self._prev_gps[0] if self._prev_gps else 0.0
+            cleaned['lon'] = self._prev_gps[1] if self._prev_gps else 0.0
+            cleaned['gps_altitude'] = data['gps_altitude']
+        else:
+            lat = float(np.clip(data['lat'], -90.0, 90.0))
+            lon = float(np.clip(data['lon'], -180.0, 180.0))
+            if self._prev_gps is not None:
+                dlat = (lat - self._prev_gps[0]) * 111320.0
+                dlon = (lon - self._prev_gps[1]) * 111320.0 * math.cos(math.radians(lat))
+                dist = math.sqrt(dlat**2 + dlon**2)
+                if dist > GPS_MAX_SPEED * 0.1:
+                    print(f"[SensorPreprocess] GPS jump detected: {dist:.2f}m, skipping")
+                    cleaned['lat'] = self._prev_gps[0]
+                    cleaned['lon'] = self._prev_gps[1]
+                else:
+                    cleaned['lat'] = lat
+                    cleaned['lon'] = lon
+                    self._prev_gps = (lat, lon)
+            else:
+                cleaned['lat'] = lat
+                cleaned['lon'] = lon
+                self._prev_gps = (lat, lon)
+            cleaned['gps_altitude'] = float(np.clip(data['gps_altitude'], -500.0, 50000.0))
         # IMU
         cleaned['roll'] = float(np.clip(data['roll'], -180.0, 180.0))
         cleaned['pitch'] = float(np.clip(data['pitch'], -90.0, 90.0))
@@ -69,12 +100,12 @@ class SensorPreprocess:
         cleaned['pressure'] = float(np.clip(data['pressure'], 300.0, 1100.0))
         cleaned['temp'] = float(np.clip(data['temp'], -40.0, 85.0))
         cleaned['baro_altitude'] = float(np.clip(data['baro_altitude'], -500.0, 50000.0))
-        # GPS 품질 (필터링 불필요)
+        # GPS 품질
         cleaned['satellites'] = int(data.get('satellites', 0))
         cleaned['fix_quality'] = int(data.get('fix_quality', 0))
         cleaned['hdop'] = float(np.clip(data.get('hdop', 0.0), 0.0, 99.9))
         return cleaned
-
+    
     def _low_pass_filter(self, data: dict) -> dict:
         """
         low-pass filter를 적용한다.
@@ -86,7 +117,7 @@ class SensorPreprocess:
 
         filtered = {}
         int_keys = ['satellites', 'fix_quality']
-        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag']
+        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag', 'lat', 'lon', 'gps_altitude']
 
         for key, value in data.items():
             if key in skip_keys:
