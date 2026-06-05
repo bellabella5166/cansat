@@ -148,6 +148,9 @@ class Sensor:
                     'lat': float(msg.latitude),
                     'lon': float(msg.longitude),
                     'gps_altitude': float(msg.altitude),
+                    'satellites': int(msg.num_sats),
+                    'fix_quality': int(msg.gps_qual),
+                    'hdop': float(msg.horizontal_dil) if msg.horizontal_dil else 99.9
                 }
         except Exception:
             pass
@@ -211,7 +214,7 @@ class Sensor:
                     data['accel_x'], data['accel_y'], data['accel_z'],
                     data['gyro_x'], data['gyro_y'], data['gyro_z'],
                     data['satellites'], data['fix_quality'], data['hdop'],
-                ])
+            ])
             return data, timestamp
 
         except Exception as e:
