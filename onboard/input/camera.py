@@ -68,7 +68,7 @@ class Camera:
             # SD카드에 저장
             filename = f"{image_id}_{format_timestamp(timestamp)}.jpg"
             save_path = os.path.join(self.save_dir, filename)
-            cv2.imwrite(save_path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(save_path, image)
 
             return image, timestamp, save_path
 
