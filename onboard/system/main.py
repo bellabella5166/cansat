@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import queue
+import cv2
 import signal
 import sys
 import time
