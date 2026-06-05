@@ -154,7 +154,7 @@ class Sensor:
                 }
         except Exception:
             pass
-        return {'lat': 0.0, 'lon': 0.0, 'gps_altitude': 0.0}
+        return {'lat': 0.0, 'lon': 0.0, 'gps_altitude': 0.0, 'satellites': 0, 'fix_quality': 0, 'hdop': 99.9}
 
     def _mock_data(self) -> dict:
         """Mock 센서 데이터 생성 (로컬 테스트용)"""
