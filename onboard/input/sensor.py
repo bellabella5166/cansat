@@ -9,14 +9,14 @@ from onboard.config import (
     GPS_PORT,
     GPS_BAUDRATE,
 )
+import math
 
 # Pi4 환경에서만 import
 try:
-    import board
-    import adafruit_bno055
-    BNO055_AVAILABLE = True
+    from mpu6050 import mpu6050
+    MPU6050_AVAILABLE = True
 except ImportError:
-    BNO055_AVAILABLE = False
+    MPU6050_AVAILABLE = False
 
 try:
     import adafruit_bmp3xx
@@ -45,8 +45,10 @@ class Sensor:
             mock (bool): True면 Mock 모드 (로컬 테스트용)
         """
         self.save_dir = save_dir
-        self.mock = mock or not (BNO055_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
+        self.mock = mock or not (MPU6050_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
         self.imu = None
+        self._last_gyro_time = None  # yaw 적분용
+        self._yaw = 0.0              # yaw 누적값
         self.baro = None
         self.gps = None
 
@@ -72,15 +74,16 @@ class Sensor:
                     'pressure', 'temp', 'baro_altitude',
                     'accel_x', 'accel_y', 'accel_z',
                     'gyro_x', 'gyro_y', 'gyro_z',
-                    'satellites', 'fix_quality', 'hdop',
-                    'calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag'
+                    'satellites', 'fix_quality', 'hdop'
                 ])
 
     def _init_sensors(self):
         """실제 센서 초기화 (Pi4 전용)"""
         # BNO055 IMU 초기화
+        import adafruit_bmp3xx
+        import board
+        self.imu = mpu6050(0x68)
         i2c = board.I2C()
-        self.imu = adafruit_bno055.BNO055_I2C(i2c)
 
         # BMP388 Barometer 초기화
         self.baro = adafruit_bmp3xx.BMP3XX_I2C(i2c)
@@ -96,25 +99,35 @@ class Sensor:
         print(f"[Sensor] Ground altitude set: {self.ground_altitude:.2f} m")
 
     def _read_imu(self) -> dict:
-        euler = self.imu.euler
-        accel = self.imu.linear_acceleration  # (x, y, z) m/s²
-        gyro  = self.imu.gyro                 # (x, y, z) rad/s → °/s 변환 필요 여부 확인
+        accel_data = self.imu.get_accel_data()  # m/s²
+        gyro_data  = self.imu.get_gyro_data()   # °/s
 
-        # calib 상태 확인 (0~3, 3이 완전 교정)
-        calib = self.imu.calibration_status  # (sys, gyro, accel, mag)
-        if any(v < 1 for v in calib):
-            print(f"[Sensor] WARNING BNO055 calib low: sys={calib[0]}, gyro={calib[1]}, accel={calib[2]}, mag={calib[3]}")
+        # roll/pitch 가속도로 계산
+        ax = accel_data['x']
+        ay = accel_data['y']
+        az = accel_data['z']
+        roll  = math.degrees(math.atan2(ay, az))
+        pitch = math.degrees(math.atan2(-ax, math.sqrt(ay**2 + az**2)))
+
+        # yaw 자이로 적분
+        now = time.monotonic()
+        if self._last_gyro_time is None:
+            self._last_gyro_time = now
+        dt = now - self._last_gyro_time
+        self._last_gyro_time = now
+        self._yaw += gyro_data['z'] * dt
+        self._yaw %= 360.0
 
         return {
-            'roll':    euler[2] if euler[2] is not None else 0.0,
-            'pitch':   euler[1] if euler[1] is not None else 0.0,
-            'yaw':     euler[0] if euler[0] is not None else 0.0,
-            'accel_x': accel[0] if accel[0] is not None else 0.0,
-            'accel_y': accel[1] if accel[1] is not None else 0.0,
-            'accel_z': accel[2] if accel[2] is not None else 0.0,
-            'gyro_x':  gyro[0]  if gyro[0]  is not None else 0.0,
-            'gyro_y':  gyro[1]  if gyro[1]  is not None else 0.0,
-            'gyro_z':  gyro[2]  if gyro[2]  is not None else 0.0,
+            'roll':    roll,
+            'pitch':   pitch,
+            'yaw':     self._yaw,
+            'accel_x': ax,
+            'accel_y': ay,
+            'accel_z': az,
+            'gyro_x':  gyro_data['x'],
+            'gyro_y':  gyro_data['y'],
+            'gyro_z':  gyro_data['z'],
         }
 
     def _read_baro(self) -> dict:
@@ -163,10 +176,6 @@ class Sensor:
             'satellites': int(np.random.randint(4, 12)),
             'fix_quality': 1,
             'hdop': float(np.random.uniform(0.8, 2.0)),
-            'calib_sys':   3,
-            'calib_gyro':  3,
-            'calib_accel': 3,
-            'calib_mag':   3
         }
 
     def read(self, sensor_id: str) -> tuple:
@@ -202,10 +211,7 @@ class Sensor:
                     data['accel_x'], data['accel_y'], data['accel_z'],
                     data['gyro_x'], data['gyro_y'], data['gyro_z'],
                     data['satellites'], data['fix_quality'], data['hdop'],
-                    data.get('calib_sys', 3), data.get('calib_gyro', 3),
-                    data.get('calib_accel', 3), data.get('calib_mag', 3)
                 ])
-
             return data, timestamp
 
         except Exception as e:
