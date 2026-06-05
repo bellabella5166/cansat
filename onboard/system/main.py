@@ -41,7 +41,7 @@ from onboard.detection.representative_selector import RepresentativeSelector
 from onboard.config import (
     MOCK_MODE, COMM_MOCK,
     IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR,
-    XBEE_PORT, XBEE_BAUDRATE,
+    XBEE_PORT, XBEE_BAUDRATE, QUALITY_SAVE_DIR,
     CAMERA_FPS,
     MAX_RETRY,
     ALTITUDE_TRIGGER,
@@ -250,7 +250,9 @@ def image_loop(camera: Camera, validator: ImageValidator,
             quality_ok, lap_score = quality.check(img, imu)
             if not quality_ok:
                 continue
-
+            filename = f"{image_id_str}_{lap_score:.1f}.jpg"
+            cv2.imwrite(os.path.join(QUALITY_SAVE_DIR, filename), img)
+            
             # 5. 전처리 (640×640 letterbox)
             preprocessed = preprocessor.process(img)
             if preprocessed is None:
@@ -355,6 +357,7 @@ def main():
     signal.signal(signal.SIGTERM, _stop)
 
     os.makedirs(IMAGE_SAVE_DIR,  exist_ok=True)
+    os.makedirs(QUALITY_SAVE_DIR, exist_ok=True)
     os.makedirs(SENSOR_SAVE_DIR, exist_ok=True)
     os.makedirs(LOG_SAVE_DIR,    exist_ok=True)
 
