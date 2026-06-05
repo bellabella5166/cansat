@@ -5,7 +5,8 @@ MOCK_MODE = False
 COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
 
 # ===== 저장 경로 =====
-DATA_DIR = "data"
+import time
+DATA_DIR = f"data/{int(time.time())}"
 IMAGE_SAVE_DIR = f"{DATA_DIR}/images"
 SENSOR_SAVE_DIR = f"{DATA_DIR}/sensors"
 LOG_SAVE_DIR = f"{DATA_DIR}/logs"
