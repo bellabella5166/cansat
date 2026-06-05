@@ -39,7 +39,7 @@ from onboard.detection.representative_selector import RepresentativeSelector
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 from onboard.config import (
-    MOCK_MODE,
+    MOCK_MODE, COMM_MOCK,
     IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR,
     XBEE_PORT, XBEE_BAUDRATE,
     CAMERA_FPS,
