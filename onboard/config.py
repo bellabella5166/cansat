@@ -20,7 +20,7 @@ CAMERA_FPS = 1  # 1fps
 PREPROCESS_SIZE = 640  # letterbox 리사이징 크기
 
 # ===== 품질 판별 임계값 =====
-LAPLACIAN_THRESHOLD = 100.0   # 블러 감지 임계값 (낮을수록 흐림)
+LAPLACIAN_THRESHOLD = 30   # 블러 감지 임계값 (낮을수록 흐림)
 EXPOSURE_LOW = 30             # 노출 부족 임계값 (0~255)
 EXPOSURE_HIGH = 220           # 노출 과다 임계값 (0~255)
 ATTITUDE_THRESHOLD = 30.0     # 자세각 임계값 (도)
