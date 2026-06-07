@@ -73,7 +73,7 @@ class SensorPreprocess:
                 dlat = (lat - self._prev_gps[0]) * 111320.0
                 dlon = (lon - self._prev_gps[1]) * 111320.0 * math.cos(math.radians(lat))
                 dist = math.sqrt(dlat**2 + dlon**2)
-                if dist > GPS_MAX_SPEED * 0.1:
+                if dist > GPS_MAX_SPEED * 1.0:
                     print(f"[SensorPreprocess] GPS jump detected: {dist:.2f}m, skipping")
                     cleaned['lat'] = self._prev_gps[0]
                     cleaned['lon'] = self._prev_gps[1]

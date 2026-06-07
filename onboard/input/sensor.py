@@ -51,6 +51,8 @@ class Sensor:
         self._yaw = 0.0              # yaw 누적값
         self.baro = None
         self.gps = None
+        self._last_gps = {'lat': 0.0, 'lon': 0.0, 'gps_altitude': 0.0,
+                          'satellites': 0, 'fix_quality': 0, 'hdop': 99.9}
 
         os.makedirs(self.save_dir, exist_ok=True)
 
@@ -144,17 +146,18 @@ class Sensor:
             line = self.gps.readline().decode('ascii', errors='replace')
             if line.startswith('$GPGGA') or line.startswith('$GNGGA'):
                 msg = pynmea2.parse(line)
-                return {
+                self._last_gps = {
                     'lat': float(msg.latitude),
                     'lon': float(msg.longitude),
-                    'gps_altitude': float(msg.altitude),
+                    'gps_altitude': float(msg.altitude) if msg.altitude else self._last_gps['gps_altitude'],
                     'satellites': int(msg.num_sats),
                     'fix_quality': int(msg.gps_qual),
-                    'hdop': float(msg.horizontal_dil) if msg.horizontal_dil else 99.9
+                    'hdop': float(msg.horizontal_dil) if msg.horizontal_dil else 99.9,
                 }
+                return self._last_gps
         except Exception:
             pass
-        return {'lat': 0.0, 'lon': 0.0, 'gps_altitude': 0.0, 'satellites': 0, 'fix_quality': 0, 'hdop': 99.9}
+        return self._last_gps
 
     def _mock_data(self) -> dict:
         """Mock 센서 데이터 생성 (로컬 테스트용)"""
