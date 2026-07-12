@@ -44,7 +44,12 @@ class ImageQuality:
             print(f"[ImageQuality] ❌ brightness excess : brightness={mean_brightness:.2f}")
             return False, laplacian_score
         
-        
+        # 3. IMU 캘리브레이션 신뢰도 확인
+        calib_sys = imu.get('calib_sys', 3)
+        if calib_sys < 1:
+            print(f"[ImageQuality] ❌ IMU calib unreliable: calib_sys={calib_sys}")
+            return False, laplacian_score
+
         # 4. 자세각 감지 (IMU 융합)
         roll = abs(imu.get('roll', 0.0))
         pitch = abs(imu.get('pitch', 0.0))
