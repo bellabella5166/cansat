@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from onboard.config import PREPROCESS_SIZE
+from onboard.system.config import PREPROCESS_SIZE
 
 
 class ImagePreprocess:

@@ -1,6 +1,6 @@
 import numpy as np
 import onnxruntime as ort
-from onboard.config import (
+from onboard.system.config import (
     MOCK_MODE,
     MODEL_PATH,
     CONFIDENCE_THRESHOLD,

@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from onboard.config import (
+from onboard.system.config import (
     LAPLACIAN_THRESHOLD,
     EXPOSURE_LOW,
     EXPOSURE_HIGH,

@@ -3,7 +3,7 @@ import csv
 import numpy as np
 import time
 from onboard.input.timestamp_manager import get_timestamp, format_timestamp
-from onboard.config import (
+from onboard.system.config import (
     MOCK_MODE,
     SENSOR_SAVE_DIR,
     GPS_PORT,

@@ -1,6 +1,6 @@
 import numpy as np
 import math
-from onboard.config import SENSOR_LOWPASS_ALPHA, GPS_MAX_SPEED, GPS_MAX_HDOP
+from onboard.system.config import SENSOR_LOWPASS_ALPHA, GPS_MAX_SPEED, GPS_MAX_HDOP
 
 
 class SensorPreprocess:

@@ -3,7 +3,7 @@ import os
 import csv
 import cv2
 import numpy as np
-from onboard.config import IMAGE_SAVE_DIR, SENSOR_SAVE_DIR
+from onboard.system.config import IMAGE_SAVE_DIR, SENSOR_SAVE_DIR
 from onboard.input.timestamp_manager import format_timestamp
 
 

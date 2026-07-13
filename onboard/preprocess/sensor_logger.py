@@ -1,6 +1,6 @@
 import os
 import csv
-from onboard.config import SENSOR_SAVE_DIR
+from onboard.system.config import SENSOR_SAVE_DIR
 
 
 class SensorLogger:
