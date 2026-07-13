@@ -30,10 +30,11 @@ def image_loop(camera: Camera, validator: ImageValidator,
                selector: RepresentativeSelector,
                tx_q: queue.PriorityQueue, seq,
                id_mgr: IDManager, sensor_q: queue.Queue,
-               img_q: queue.Queue, running: list, enqueue_fn) -> None:
+               img_q: queue.Queue, running: list, enqueue_fn, img_sending) -> None:
 
     interval  = 1.0 / CAMERA_FPS
     next_time = time.monotonic()
+    last_yolo_tx_time = time.monotonic()
     logger.info("Image loop started (1 fps)")
 
     selector.reset()
@@ -100,19 +101,23 @@ def image_loop(camera: Camera, validator: ImageValidator,
             det_logger.log(detections, raw_img, ts)
 
             # 9. YOLO_META 패킷 송신
-            for i, det in enumerate(detections):
-                yd = YoloDetection(
-                    timestamp  = ts,
-                    image_id   = image_id_u16,
-                    object_id  = i,
-                    class_id   = 0 if det["class"] == "farm" else 1,
-                    confidence = det["confidence"],
-                    x_min      = int(det["bbox"][0]),
-                    y_min      = int(det["bbox"][1]),
-                    x_max      = int(det["bbox"][2]),
-                    y_max      = int(det["bbox"][3]),
-                )
-                enqueue_fn(tx_q, PacketType.YOLO_META, yd.to_bytes(), seq, 50)
+            now_tx = time.monotonic()
+            yolo_interval = 2.0 if img_sending.is_set() else 0.0
+            if now_tx - last_yolo_tx_time >= yolo_interval:
+                for i, det in enumerate(detections):
+                    yd = YoloDetection(
+                        timestamp  = ts,
+                        image_id   = image_id_u16,
+                        object_id  = i,
+                        class_id   = 0 if det["class"] == "farm" else 1,
+                        confidence = det["confidence"],
+                        x_min      = int(det["bbox"][0]),
+                        y_min      = int(det["bbox"][1]),
+                        x_max      = int(det["bbox"][2]),
+                        y_max      = int(det["bbox"][3]),
+                    )
+                    enqueue_fn(tx_q, PacketType.YOLO_META, yd.to_bytes(), seq, 50)
+                last_yolo_tx_time = now_tx
 
             # 10. 대표 이미지 후보 등록 (전송 전까지만)
             if not rep_sent:

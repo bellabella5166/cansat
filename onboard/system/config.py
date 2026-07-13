@@ -48,3 +48,7 @@ SENSOR_LOWPASS_ALPHA = 0.2    # low-pass filter 계수 (0~1)
 GPS_MAX_SPEED = 3.0   # Maximum GPS speed (m/s)
 GPS_MAX_HDOP = 3.0    # Maximum HDOP threshold
 
+# ===== XBee 전력 설정 =====
+XBEE_VOLTAGE_V  = 3.6    # XBee 공급 전압 (V)
+XBEE_CURRENT_MA = 55.6   # XBee 송신 전류 (mA) = 0.2W / 3.6V
+POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)

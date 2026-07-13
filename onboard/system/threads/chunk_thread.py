@@ -15,7 +15,7 @@ logger = logging.getLogger("onboard.chunk")
 
 def image_chunk_loop(tx_q: queue.PriorityQueue, seq,
                      img_q: queue.Queue,
-                     running: list, enqueue_fn) -> None:
+                     running: list, enqueue_fn, img_sending) -> None:
 
     logger.info("Image chunk loop started")
 
@@ -25,6 +25,7 @@ def image_chunk_loop(tx_q: queue.PriorityQueue, seq,
         except queue.Empty:
             continue
         try:
+            img_sending.set()  # 전송 시작
             buf = io.BytesIO()
             Image.fromarray(raw_img).save(buf, format="JPEG")
             chunks = prepare_chunks(buf.getvalue(), img_id)
@@ -34,5 +35,5 @@ def image_chunk_loop(tx_q: queue.PriorityQueue, seq,
                         img_id, len(chunks))
         except Exception as e:
             logger.error("Image chunk error: %s", e)
-
-    logger.info("Image chunk loop stopped")
+        finally:
+            img_sending.clear()  

@@ -13,6 +13,7 @@ shared/protocol.py
   0x01  SENSOR     – GPS/IMU/기압계 데이터 (10 Hz)
   0x02  YOLO_META  – YOLOv8n 탐지 메타데이터 (탐지 발생 시마다)
   0x03  IMG        – 대표 이미지 청크 (1장 선별 후 분할)
+  0x04  POWER      – 통신 전력 데이터
   0x10  ACK        – 수신 확인
   0x11  NACK       – 청크 재전송 요청
   0x20  HEARTBEAT  – 생존 신호 (5초 주기)
@@ -48,6 +49,7 @@ class PacketType(IntEnum):
     ACK        = 0x10
     NACK       = 0x11
     HEARTBEAT  = 0x20
+    POWER      = 0x04
 
 
 # ── CRC-16/XMODEM ─────────────────────────────────────────────────────────────

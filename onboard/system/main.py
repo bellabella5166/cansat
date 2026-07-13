@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import logging
 import os
 import queue
@@ -20,6 +21,7 @@ sys.path.insert(0, str(BASE_DIR))
 # ── shared 모듈 ────────────────────────────────────────────────────────────────
 from protocol      import Packet, PacketType, encode_packet
 from serial_wrapper import XBeeSerial
+from telemetry     import SensorData, YoloDetection, decode_nack, CommPowerData
 
 # ── onboard 모듈 ───────────────────────────────────────────────────────────────
 from onboard.input.camera                      import Camera
@@ -47,6 +49,7 @@ from onboard.system.config import (
     CAMERA_FPS,
     MAX_RETRY,
     ALTITUDE_TRIGGER,
+    XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
 )
 
 # ── 로깅 ──────────────────────────────────────────────────────────────────────
@@ -71,6 +74,7 @@ _PRIORITY = {
     PacketType.SENSOR:    2,
     PacketType.YOLO_META: 3,
     PacketType.IMG:       4,
+    PacketType.POWER:     2,
 }
 
 # ── 큐 최대 크기 ──────────────────────────────────────────────────────────────
@@ -141,6 +145,7 @@ def main():
     tx_q    = queue.PriorityQueue()
     sensor_q = queue.Queue(maxsize=5)
     img_q   = queue.Queue(maxsize=3)
+    img_sending = threading.Event()
 
     # Mock 모드: XBeeSerial 없이 실행
     class MockSerial:
@@ -157,19 +162,19 @@ def main():
         threads = [
             threading.Thread(
                 target=sensor_loop,
-                args=(sensor, sen_pre, sen_log, tx_q, seq, id_mgr, sensor_q, running, enqueue),
+                args=(sensor, sen_pre, sen_log, tx_q, seq, id_mgr, sensor_q, running, enqueue, img_sending),
                 daemon=True, name="sensor"
             ),
             threading.Thread(
                 target=image_loop,
                 args=(camera, validator, quality, preprocessor,
-                      detector, det_log, selector,
-                      tx_q, seq, id_mgr, sensor_q, img_q, running, enqueue),
+                        detector, det_log, selector,
+                        tx_q, seq, id_mgr, sensor_q, img_q, running, enqueue, img_sending),
                 daemon=True, name="image"
             ),
             threading.Thread(
                 target=image_chunk_loop,
-                args=(tx_q, seq, img_q, running, enqueue),
+                args=(tx_q, seq, img_q, running, enqueue, img_sending),
                 daemon=True, name="img_chunk"
             ),
             threading.Thread(
@@ -188,14 +193,42 @@ def main():
 
         logger.info("Onboard system started")
 
+        bytes_sent   = 0
+        packets_sent = 0
+        total_duration_s = 0.0
+        last_power_report = time.monotonic()
+
         while running[0]:
             try:
                 item = tx_q.get(timeout=0.1)
                 serial.write(item.raw)
+                n = len(item.raw)
+                bytes_sent   += n
+                packets_sent += 1
+                total_duration_s += n * 8 / XBEE_BAUDRATE  # 송신 시간 누적
+
             except queue.Empty:
                 pass
             except Exception as e:
                 logger.error("Serial write error: %s", e)
+
+            # POWER 패킷 주기적 송신
+            now = time.monotonic()
+            if now - last_power_report >= POWER_REPORT_INTERVAL:
+                energy_mwh = (XBEE_VOLTAGE_V * XBEE_CURRENT_MA * total_duration_s) / 3600000.0
+                pd = CommPowerData(
+                    timestamp    = time.time(),
+                    voltage_v    = XBEE_VOLTAGE_V,
+                    current_ma   = XBEE_CURRENT_MA,
+                    duration_s   = total_duration_s,
+                    energy_mwh   = energy_mwh,
+                    bytes_sent   = bytes_sent,
+                    packets_sent = packets_sent,
+                )
+                enqueue(tx_q, PacketType.POWER, pd.to_bytes(), seq, 5)
+                logger.info("POWER: duration=%.2fs, energy=%.4fmWh, bytes=%d",
+                            total_duration_s, energy_mwh, bytes_sent)
+                last_power_report = now
 
         camera.close()
         sensor.close()

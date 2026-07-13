@@ -213,6 +213,64 @@ class YoloDetection:
             self.x_min, self.y_min, self.x_max, self.y_max,
         ]
 
+# ── ACK / NACK 위에 추가 ──────────────────────────────────────────────────────
+# Communication power telemetry
+# Format: d f f f f I I = 8+4+4+4+4+4+4 = 32 bytes
+_POWER_FMT = f"{ENDIAN}dffffII"
+_POWER_STRUCT = struct.Struct(_POWER_FMT)
+POWER_PAYLOAD_SIZE: int = _POWER_STRUCT.size
+
+
+@dataclass
+class CommPowerData:
+    timestamp: float = 0.0
+    voltage_v: float = 0.0
+    current_ma: float = 0.0
+    duration_s: float = 0.0
+    energy_mwh: float = 0.0
+    bytes_sent: int = 0
+    packets_sent: int = 0
+
+    def to_bytes(self) -> bytes:
+        return _POWER_STRUCT.pack(
+            self.timestamp,
+            self.voltage_v,
+            self.current_ma,
+            self.duration_s,
+            self.energy_mwh,
+            self.bytes_sent & 0xFFFFFFFF,
+            self.packets_sent & 0xFFFFFFFF,
+        )
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "CommPowerData":
+        if len(data) < _POWER_STRUCT.size:
+            raise ValueError(
+                f"CommPowerData: {_POWER_STRUCT.size} bytes need, {len(data)} receive"
+            )
+        v = _POWER_STRUCT.unpack_from(data)
+        return cls(
+            timestamp=v[0],
+            voltage_v=v[1],
+            current_ma=v[2],
+            duration_s=v[3],
+            energy_mwh=v[4],
+            bytes_sent=v[5],
+            packets_sent=v[6],
+        )
+
+    @staticmethod
+    def csv_header() -> list[str]:
+        return [
+            "timestamp", "voltage_v", "current_ma", "duration_s",
+            "energy_mwh", "bytes_sent", "packets_sent",
+        ]
+
+    def to_csv_row(self) -> list:
+        return [
+            self.timestamp, self.voltage_v, self.current_ma, self.duration_s,
+            self.energy_mwh, self.bytes_sent, self.packets_sent,
+        ]
 
 # ── ACK / NACK ────────────────────────────────────────────────────────────────
 _NACK_HDR = struct.Struct(f"{ENDIAN}HH")  # image_id, count

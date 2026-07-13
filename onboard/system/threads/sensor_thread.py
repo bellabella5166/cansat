@@ -20,10 +20,11 @@ logger = logging.getLogger("onboard.sensor")
 def sensor_loop(sensor: Sensor, preprocess: SensorPreprocess,
                 sensor_logger: SensorLogger, tx_q: queue.PriorityQueue,
                 seq, id_mgr: IDManager, sensor_q: queue.Queue,
-                running: list, enqueue_fn) -> None:
+                running: list, enqueue_fn, img_sending) -> None:
 
     interval  = 0.1  # 10 Hz
     next_time = time.monotonic()
+    last_tx_time = time.monotonic()
     logger.info("Sensor loop started (10 Hz)")
 
     while running[0]:
@@ -65,7 +66,11 @@ def sensor_loop(sensor: Sensor, preprocess: SensorPreprocess,
                 fix_quality   = int(processed.get("fix_quality",  0)),
                 hdop          = float(processed.get("hdop",       0.0)),
             )
-            enqueue_fn(tx_q, PacketType.SENSOR, sd.to_bytes(), seq, 20)
+            now_tx = time.monotonic()
+            tx_interval = 2.0 if img_sending.is_set() else 0.1  # 0.5Hz or 10Hz
+            if now_tx - last_tx_time >= tx_interval:
+                enqueue_fn(tx_q, PacketType.SENSOR, sd.to_bytes(), seq, 20)
+                last_tx_time = now_tx
 
             try:
                 sensor_q.put_nowait(processed)
