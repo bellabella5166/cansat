@@ -47,26 +47,21 @@ class RepresentativeSelector:
             print("[RepresentativeSelector] ❌ candidate image none")
             return None, None
 
-        # 탐지 결과 있는 후보만 필터링
-        valid_candidates = {
-            k: v for k, v in self._candidates.items()
-            if len(v['confidences']) > 0
-        }
-
-        if not valid_candidates:
-            print("[RepresentativeSelector] ❌ valid detection result None")
-            return None, None
-
-        # 1순위: 평균 신뢰도 가장 높은 이미지
+        # 1순위: 탐지 있고 평균 신뢰도 높은 이미지
+        # 2순위: 탐지 없어도 라플라시안 점수 높은 이미지
         best_id = max(
-            valid_candidates,
+            self._candidates,
             key=lambda k: (
-                np.mean(valid_candidates[k]['confidences']),  # 1순위
-                valid_candidates[k]['laplacian_score']         # 2순위 (동점 시)
+                len(self._candidates[k]['confidences']) > 0,           # 탐지 여부 (있으면 우선)
+                np.mean(self._candidates[k]['confidences']) if len(self._candidates[k]['confidences']) > 0 else 0.0,
+                self._candidates[k]['laplacian_score']
             )
         )
 
-        return valid_candidates[best_id]['image'], best_id
+        print(f"[RepresentativeSelector] Selected: {best_id}, "
+              f"detections={len(self._candidates[best_id]['confidences'])}, "
+              f"laplacian={self._candidates[best_id]['laplacian_score']:.2f}")
+        return self._candidates[best_id]['image'], best_id
 
     def reset(self):
         """후보 초기화 (테스트 용도)"""
