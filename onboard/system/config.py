@@ -36,7 +36,7 @@ MAX_RETRY = 5                 # 최대 재전송 횟수
 
 # ===== 대표 이미지 설정 =====
 REPRESENTATIVE_SIZE = (320, 240)  # 대표 이미지 축소 크기
-ALTITUDE_TRIGGER = 50          # 실제로는 150m 인데, 테스트를 위해 이렇게 설정함.
+ALTITUDE_TRIGGER = 10          # 실제로는 150m 인데, 테스트를 위해 이렇게 설정함.
 
 # config.py에 추가
 GPS_PORT = "/dev/ttyS0"   # GPS 포트 (Pi4 기준)
