@@ -23,7 +23,7 @@ PREPROCESS_SIZE = 640  # letterbox 리사이징 크기
 LAPLACIAN_THRESHOLD = 30   # 블러 감지 임계값 (낮을수록 흐림)
 EXPOSURE_LOW = 30             # 노출 부족 임계값 (0~255)
 EXPOSURE_HIGH = 220           # 노출 과다 임계값 (0~255)
-ATTITUDE_THRESHOLD = 10.0     # 자세각 임계값 (도)
+ATTITUDE_THRESHOLD = 20.0     # 자세각 임계값 (도)
 
 # ===== YOLO 설정 =====
 MODEL_PATH = "models/yolov8n.onnx"
@@ -36,7 +36,7 @@ MAX_RETRY = 5                 # 최대 재전송 횟수
 
 # ===== 대표 이미지 설정 =====
 REPRESENTATIVE_SIZE = (320, 240)  # 대표 이미지 축소 크기
-ALTITUDE_TRIGGER = 1.0           # 실제로는 150m 인데, 테스트를 위해 이렇게 설정함.
+ALTITUDE_TRIGGER = 50          # 실제로는 150m 인데, 테스트를 위해 이렇게 설정함.
 
 # config.py에 추가
 GPS_PORT = "/dev/ttyS0"   # GPS 포트 (Pi4 기준)
