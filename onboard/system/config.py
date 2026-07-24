@@ -52,3 +52,13 @@ GPS_MAX_HDOP = 3.0    # Maximum HDOP threshold
 XBEE_VOLTAGE_V  = 3.6    # XBee 공급 전압 (V)
 XBEE_CURRENT_MA = 55.6   # XBee 송신 전류 (mA) = 0.2W / 3.6V
 POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
+
+# ===== 자세 제어 설정 =====
+GIMBAL_ALPHA       = 0.96   # 상보필터 상수
+GIMBAL_SLEW        = 8.0    # 최대 각속도 (deg/tick)
+GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
+GIMBAL_PIN_ROLL    = 18     # 롤 서보 GPIO 핀
+GIMBAL_PIN_PITCH   = 13     # 피치 서보 GPIO 핀
+
+GIMBAL_NEUTRAL_ROLL  = 1500  # 롤 서보 중립 펄스 (μs)
+GIMBAL_NEUTRAL_PITCH = 1500  # 피치 서보 중립 펄스 (μs)

@@ -9,6 +9,7 @@ pyserial>=3.5
 
 # 센서 (Pi4에서만 설치)
 smbus2>=0.6.0
+pigpio
 adafruit-circuitpython-bmp3xx
 mpu6050-raspberrypi
 smbus

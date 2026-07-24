@@ -40,6 +40,7 @@ from onboard.system.threads.image_thread       import image_loop
 from onboard.system.threads.chunk_thread       import image_chunk_loop
 from onboard.system.threads.heartbeat_thread   import heartbeat_loop
 from onboard.system.threads.nack_thread        import nack_loop
+from onboard.system.threads.gimbal_thread      import gimbal_loop
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 from onboard.system.config import (
@@ -186,6 +187,11 @@ def main():
                 target=heartbeat_loop,
                 args=(tx_q, seq, running, enqueue),
                 daemon=True, name="heartbeat"
+            ),
+            threading.Thread(
+                target=gimbal_loop,
+                args=(running,),
+                daemon=True, name="gimbal"
             ),
         ]
         for t in threads:
