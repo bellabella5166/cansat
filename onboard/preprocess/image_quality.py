@@ -43,14 +43,3 @@ class ImageQuality:
         if mean_brightness > EXPOSURE_HIGH:
             print(f"[ImageQuality] ❌ brightness excess : brightness={mean_brightness:.2f}")
             return False, laplacian_score
-        
-        # 4. 자세각 감지 (IMU 융합)
-        roll = abs(imu.get('roll', 0.0))
-        pitch = abs(imu.get('pitch', 0.0))
-
-        if roll > ATTITUDE_THRESHOLD or pitch > ATTITUDE_THRESHOLD:
-            print(f"[ImageQuality] ❌ IMU excess: roll={roll:.2f}, pitch={pitch:.2f}")
-            return False, laplacian_score
-
-        print(f"[ImageQuality] ✅ quality pass: laplacian={laplacian_score:.2f}, brightness={mean_brightness:.2f}, roll={roll:.2f}, pitch={pitch:.2f}")
-        return True, laplacian_score

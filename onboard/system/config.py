@@ -23,7 +23,6 @@ PREPROCESS_SIZE = 640  # letterbox 리사이징 크기
 LAPLACIAN_THRESHOLD = 30   # 블러 감지 임계값 (낮을수록 흐림)
 EXPOSURE_LOW = 30             # 노출 부족 임계값 (0~255)
 EXPOSURE_HIGH = 220           # 노출 과다 임계값 (0~255)
-ATTITUDE_THRESHOLD = 90.0     # 자세각 임계값 (도)
 
 # ===== YOLO 설정 =====
 MODEL_PATH = "models/yolov8n.onnx"
