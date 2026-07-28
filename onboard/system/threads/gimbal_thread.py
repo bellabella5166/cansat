@@ -119,7 +119,7 @@ def gimbal_loop(running: list) -> None:
             logger.error("Gimbal loop error: %s", e)
 
         elapsed = time.monotonic() - loop_start
-        time.sleep(max(0.0, DT - elapsed))
+        time.sleep(max(0.0, DT-elapsed))
 
     # 종료 시 서보 중립 복귀
     pi.set_servo_pulsewidth(PIN_ROLL,  NEUTRAL_ROLL)
