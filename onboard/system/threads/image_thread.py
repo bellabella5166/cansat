@@ -60,47 +60,33 @@ def image_loop(camera: Camera, validator: ImageValidator,
             imu = {}
             while not sensor_q.empty():
                 imu = sensor_q.get_nowait()
-
-            # 3. 고도 트리거 - 대표 이미지 선별 및 전송 (1회만)
             baro_alt = imu.get("baro_altitude", 9999.0)
-            if not rep_sent and baro_alt <= ALTITUDE_TRIGGER:
-                rep_img, rep_id = selector.select()
-                if rep_img is not None:
-                    rep_id_u16 = id_mgr.get_image_id_uint16()
-                    try:
-                        img_q.put_nowait(("representative", rep_id_u16, rep_img))
-                        logger.info("Representative image triggered at alt=%.1fm, id=%s",
-                                    baro_alt, rep_id)
-                    except Exception:
-                        pass
-                else:
-                    logger.warning("No representative image available at alt=%.1fm", baro_alt)
-                rep_sent = True
 
-            # 4. 손상 이미지 필터링
+
+            # 3. 손상 이미지 필터링
             img, valid = validator.validate(raw_img)
             if not valid:
                 continue
 
-            # 5. 품질 판별 (블러/노출/자세각)
+            # 4. 품질 판별 (블러/노출/자세각)
             quality_ok, lap_score = quality.check(img, imu)
             if not quality_ok:
                 continue
             filename = f"{image_id_str}_{lap_score:.1f}.jpg"
             cv2.imwrite(os.path.join(QUALITY_SAVE_DIR, filename), img)
 
-            # 6. 전처리 (640×640 letterbox)
+            # 5. 전처리 (640×640 letterbox)
             preprocessed = preprocessor.process(img)
             if preprocessed is None:
                 continue
 
-            # 7. YOLO 탐지
+            # 6. YOLO 탐지
             detections = detector.detect(preprocessed, image_id_str)
 
-            # 8. 탐지 결과 저장
+            # 7. 탐지 결과 저장
             det_logger.log(detections, raw_img, ts)
 
-            # 9. YOLO_META 패킷 송신
+            # 8. YOLO_META 패킷 송신
             now_tx = time.monotonic()
             yolo_interval = 2.0 if img_sending.is_set() else 0.0
             if now_tx - last_yolo_tx_time >= yolo_interval:
@@ -119,9 +105,26 @@ def image_loop(camera: Camera, validator: ImageValidator,
                     enqueue_fn(tx_q, PacketType.YOLO_META, yd.to_bytes(), seq, 50)
                 last_yolo_tx_time = now_tx
 
-            # 10. 대표 이미지 후보 등록 (전송 전까지만)
+            # 9. 대표 이미지 후보 등록 (전송 전까지만) — 트리거 체크보다 먼저!
             if not rep_sent:
                 selector.add(image_id_str, raw_img, detections, lap_score)
+
+            # 10. 고도 트리거 - 대표 이미지 선별 및 전송
+            if not rep_sent and baro_alt <= ALTITUDE_TRIGGER:
+                rep_img, rep_id = selector.select()
+                if rep_img is not None:
+                    rep_id_u16 = id_mgr.get_image_id_uint16()
+                    try:
+                        img_q.put_nowait(("representative", rep_id_u16, rep_img))
+                        logger.info("Representative image triggered at alt=%.1fm, id=%s",
+                                    baro_alt, rep_id)
+                        rep_sent = True   # 성공했을 때만 True로 설정
+                    except Exception:
+                        pass   # 큐 실패 시 rep_sent 유지 → 다음 프레임에서 재시도
+                else:
+                    logger.warning("No representative image available at alt=%.1fm — will retry next frame",
+                                    baro_alt)
+                    # rep_sent를 True로 만들지 않음 → 후보 쌓일 때까지 재시도 가능
 
         except Exception as e:
             logger.error("Image loop error: %s", e)

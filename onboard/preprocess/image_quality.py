@@ -4,7 +4,6 @@ from onboard.system.config import (
     LAPLACIAN_THRESHOLD,
     EXPOSURE_LOW,
     EXPOSURE_HIGH,
-    ATTITUDE_THRESHOLD,
 )
 
 
