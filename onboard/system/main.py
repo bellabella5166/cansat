@@ -9,6 +9,7 @@ import queue
 import signal
 import sys
 import threading
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,9 +33,12 @@ from onboard.preprocess.image_quality          import ImageQuality
 from onboard.preprocess.image_preprocess       import ImagePreprocess
 from onboard.preprocess.sensor_preprocess      import SensorPreprocess
 from onboard.preprocess.sensor_logger          import SensorLogger
+from onboard.preprocess.altitude_arbiter       import AltitudeArbiter
+from onboard.preprocess.altitude_anchor        import AltitudeAnchor
 from onboard.detection.detector                import Detector
 from onboard.detection.detection_logger        import DetectionLogger
 from onboard.detection.representative_selector import RepresentativeSelector
+from onboard.detection.checkpoint_trigger       import CheckpointTrigger
 from onboard.system.threads.sensor_thread      import sensor_loop
 from onboard.system.threads.image_thread       import image_loop
 from onboard.system.threads.chunk_thread       import image_chunk_loop
@@ -49,7 +53,8 @@ from onboard.system.config import (
     XBEE_PORT, XBEE_BAUDRATE, QUALITY_SAVE_DIR,
     CAMERA_FPS,
     MAX_RETRY,
-    ALTITUDE_TRIGGER,
+    ALTITUDE_CHECKPOINTS, ALTITUDE_DEBOUNCE_COUNT,
+    DESCENT_RATE_MPS, SENSOR_FAILURE_TIMEOUT_S,
     XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
 )
 
@@ -88,6 +93,7 @@ HB_INTERVAL  = 5.0
 @dataclass(order=True)
 class TxItem:
     priority: int
+    ptype: PacketType = field(compare=False)
     raw: bytes = field(compare=False)
 
 
@@ -102,16 +108,30 @@ class SeqCounter:
             return self._v
 
 
+# ── 타입별 tx_q 대기 개수 (qsize()는 전체 큐 크기라 타입별 가득참 판단에 못 씀) ──
+_type_counts = defaultdict(int)
+_type_counts_lock = threading.Lock()
+
+
+def _img_pending() -> int:
+    with _type_counts_lock:
+        return _type_counts[PacketType.IMG]
+
+
 # ── 큐 enqueue 헬퍼 ───────────────────────────────────────────────────────────
 def enqueue(q: queue.PriorityQueue, ptype: PacketType,
             payload: bytes, seq: SeqCounter, max_size: int) -> None:
-    if q.qsize() >= max_size:
-        logger.debug("Queue full (%s), packet dropped", ptype.name)
-        return
+    with _type_counts_lock:
+        if _type_counts[ptype] >= max_size:
+            logger.debug("Queue full (%s), packet dropped", ptype.name)
+            return
+        _type_counts[ptype] += 1
     raw = encode_packet(Packet(ptype=ptype, seq=seq.next(), payload=payload))
     try:
-        q.put_nowait(TxItem(_PRIORITY.get(ptype, 99), raw))
+        q.put_nowait(TxItem(_PRIORITY.get(ptype, 99), ptype, raw))
     except queue.Full:
+        with _type_counts_lock:
+            _type_counts[ptype] -= 1
         logger.warning("TX queue full: %s dropped", ptype.name)
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
@@ -130,10 +150,14 @@ def main():
     os.makedirs(SENSOR_SAVE_DIR, exist_ok=True)
     os.makedirs(LOG_SAVE_DIR,    exist_ok=True)
 
+    # IMU(MPU6050)/Baro(BMP388)가 공유하는 물리 I2C 버스 보호용 Lock.
+    # gimbal_thread도 같은 IMU를 별도 스레드에서 직접 읽으므로 반드시 공유해야 한다.
+    i2c_lock = threading.Lock()
+
     # 모듈 초기화
     id_mgr       = IDManager()
     camera       = Camera(mock=MOCK_MODE)
-    sensor       = Sensor(mock=MOCK_MODE)
+    sensor       = Sensor(mock=MOCK_MODE, i2c_lock=i2c_lock)
     validator    = ImageValidator()
     quality      = ImageQuality()
     preprocessor = ImagePreprocess()
@@ -142,6 +166,9 @@ def main():
     detector     = Detector(mock=MOCK_MODE)
     det_log      = DetectionLogger()
     selector     = RepresentativeSelector()
+    altitude_arbiter  = AltitudeArbiter()
+    checkpoint_trigger = CheckpointTrigger(ALTITUDE_CHECKPOINTS, ALTITUDE_DEBOUNCE_COUNT, DESCENT_RATE_MPS)
+    altitude_anchor    = AltitudeAnchor(SENSOR_FAILURE_TIMEOUT_S)
 
     tx_q    = queue.PriorityQueue()
     sensor_q = queue.Queue(maxsize=5)
@@ -169,13 +196,14 @@ def main():
             threading.Thread(
                 target=image_loop,
                 args=(camera, validator, quality, preprocessor,
-                        detector, det_log, selector,
+                        detector, det_log, selector, altitude_arbiter,
+                        checkpoint_trigger, altitude_anchor,
                         tx_q, seq, id_mgr, sensor_q, img_q, running, enqueue, img_sending),
                 daemon=True, name="image"
             ),
             threading.Thread(
                 target=image_chunk_loop,
-                args=(tx_q, seq, img_q, running, enqueue, img_sending),
+                args=(tx_q, seq, img_q, running, enqueue, img_sending, _img_pending),
                 daemon=True, name="img_chunk"
             ),
             threading.Thread(
@@ -190,8 +218,13 @@ def main():
             ),
             threading.Thread(
                 target=gimbal_loop,
-                args=(running,),
+                args=(running, i2c_lock),
                 daemon=True, name="gimbal"
+            ),
+            threading.Thread(
+                target=sensor.calibrate_ground_altitude,
+                args=(90,),
+                daemon=True, name="baro_calib"
             ),
         ]
         for t in threads:
@@ -207,16 +240,20 @@ def main():
         while running[0]:
             try:
                 item = tx_q.get(timeout=0.1)
-                serial.write(item.raw)
-                n = len(item.raw)
-                bytes_sent   += n
-                packets_sent += 1
-                total_duration_s += n * 8 / XBEE_BAUDRATE  # 송신 시간 누적
-
             except queue.Empty:
-                pass
-            except Exception as e:
-                logger.error("Serial write error: %s", e)
+                item = None
+
+            if item is not None:
+                with _type_counts_lock:
+                    _type_counts[item.ptype] -= 1
+                try:
+                    serial.write(item.raw)
+                    n = len(item.raw)
+                    bytes_sent   += n
+                    packets_sent += 1
+                    total_duration_s += n * 8 / XBEE_BAUDRATE  # 송신 시간 누적
+                except Exception as e:
+                    logger.error("Serial write error: %s", e)
 
             # POWER 패킷 주기적 송신
             now = time.monotonic()

@@ -2,12 +2,19 @@ import os
 import csv
 import numpy as np
 import time
+import threading
 from onboard.input.timestamp_manager import get_timestamp, format_timestamp
+from onboard.input.i2c_utils import I2CRetryHelper
 from onboard.system.config import (
     MOCK_MODE,
     SENSOR_SAVE_DIR,
     GPS_PORT,
     GPS_BAUDRATE,
+    BARO_SENTINEL,
+    I2C_RETRY_COUNT,
+    I2C_RETRY_DELAY_S,
+    I2C_LOCKUP_THRESHOLD,
+    SENSOR_FAILURE_TIMEOUT_S,
 )
 import math
 
@@ -38,21 +45,39 @@ class Sensor:
     Pi4 환경에서는 실제 센서, 로컬 환경에서는 Mock 데이터를 사용한다.
     """
 
-    def __init__(self, save_dir: str = SENSOR_SAVE_DIR, mock: bool = MOCK_MODE):
+    def __init__(self, save_dir: str = SENSOR_SAVE_DIR, mock: bool = MOCK_MODE,
+                 i2c_lock: threading.Lock = None):
         """
         Args:
             save_dir (str): 센서 데이터 저장 경로
             mock (bool): True면 Mock 모드 (로컬 테스트용)
+            i2c_lock (threading.Lock): IMU/Baro가 공유하는 물리 I2C 버스용 락.
+                gimbal_thread도 같은 버스의 IMU를 직접 읽으므로, 스레드 간
+                충돌을 막으려면 main.py에서 만든 락을 공유해서 넘겨야 한다.
+                넘기지 않으면(예: 테스트) 이 인스턴스 전용 락을 새로 만든다.
         """
         self.save_dir = save_dir
         self.mock = mock or not (MPU6050_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
+        self._i2c_lock = i2c_lock or threading.Lock()
         self.imu = None
         self._last_gyro_time = None
         self._yaw = 0.0
         self.baro = None
         self.gps = None
-        self._last_gps = {'lat': 0.0, 'lon': 0.0, 'gps_altitude': 0.0,
-                          'satellites': 0, 'fix_quality': 0, 'hdop': 99.9}
+        self._last_gps = {...}
+        self.ground_altitude = 0.0
+        self.ground_altitude_ready = False  # 안정화 완료 여부
+
+        # I2C 재시도 + 버스 락업 감지/리셋 (IMU/Baro 각각 독립적으로 연속 실패 카운트)
+        self._imu_retry = I2CRetryHelper(I2C_RETRY_COUNT, I2C_RETRY_DELAY_S,
+                                          I2C_LOCKUP_THRESHOLD, name="imu")
+        self._baro_retry = I2CRetryHelper(I2C_RETRY_COUNT, I2C_RETRY_DELAY_S,
+                                           I2C_LOCKUP_THRESHOLD, name="baro")
+        # 읽기 실패 시 짧게 버틸 마지막 유효값 (fallback, SENSOR_FAILURE_TIMEOUT_S까지만 유지)
+        self._last_imu_data = None
+        self._last_imu_time = None
+        self._last_baro_data = None
+        self._last_baro_time = None
 
         os.makedirs(self.save_dir, exist_ok=True)
 
@@ -95,12 +120,8 @@ class Sensor:
         # GPS 초기화
         self.gps = serial.Serial(GPS_PORT, baudrate=GPS_BAUDRATE, timeout=1)
 
-        # 발사 지점 기준 고도 저장 (10회 평균)
-        samples = [self.baro.altitude for _ in range(10)]
-        self.ground_altitude = sum(samples) / len(samples)
-        print(f"[Sensor] Ground altitude set: {self.ground_altitude:.2f} m")
-
-    def _read_imu(self) -> dict:
+    def _read_imu_raw(self) -> dict:
+        """MPU6050 레지스터 실제 읽기 (Lock/재시도 없이 1회 시도만)"""
         accel_data = self.imu.get_accel_data()
         gyro_data  = self.imu.get_gyro_data()
 
@@ -130,13 +151,64 @@ class Sensor:
             'gyro_z':  gyro_data['z'],
         }
 
-    def _read_baro(self) -> dict:
-        """BMP388에서 pressure, temp, altitude 읽기"""
+    def _read_imu(self) -> dict:
+        """IMU 읽기: 공유 I2C Lock + 재시도, 실패 시 마지막 유효값으로 짧게 fallback."""
+        now = time.monotonic()
+        try:
+            with self._i2c_lock:
+                data = self._imu_retry.call(self._read_imu_raw)
+            self._last_imu_data = data
+            self._last_imu_time = now
+            return data
+        except OSError as e:
+            age = now - self._last_imu_time if self._last_imu_time is not None else None
+            if self._last_imu_data is not None and age is not None and age < SENSOR_FAILURE_TIMEOUT_S:
+                print(f"[Sensor] IMU read failed, using fallback ({age:.1f}s old): {e}")
+                return self._last_imu_data
+            print(f"[Sensor] IMU read failed, fallback expired or unavailable (age={age}): {e}")
+            raise
+
+    def _read_baro_raw(self) -> dict:
+        """BMP388 레지스터 실제 읽기 (Lock/재시도 없이 1회 시도만)"""
+        if not self.ground_altitude_ready:
+            return {
+                'pressure': self.baro.pressure,
+                'temp': self.baro.temperature,
+                'baro_altitude': BARO_SENTINEL,
+            }
         return {
             'pressure': self.baro.pressure,
             'temp': self.baro.temperature,
-            'baro_altitude': self.baro.altitude - self.ground_altitude,  # 상대 고도
+            'baro_altitude': self.baro.altitude - self.ground_altitude,
         }
+
+    def _read_baro(self) -> dict:
+        """Baro 읽기: 공유 I2C Lock + 재시도, 실패 시 마지막 유효값으로 짧게 fallback."""
+        now = time.monotonic()
+        try:
+            with self._i2c_lock:
+                data = self._baro_retry.call(self._read_baro_raw)
+            self._last_baro_data = data
+            self._last_baro_time = now
+            return data
+        except OSError as e:
+            age = now - self._last_baro_time if self._last_baro_time is not None else None
+            if self._last_baro_data is not None and age is not None and age < SENSOR_FAILURE_TIMEOUT_S:
+                print(f"[Sensor] Baro read failed, using fallback ({age:.1f}s old): {e}")
+                return self._last_baro_data
+            print(f"[Sensor] Baro read failed, fallback expired or unavailable (age={age}): {e}")
+            raise
+
+    def calibrate_ground_altitude(self, wait_sec: int = 90) -> None:
+        """별도 스레드에서 호출. 안정화 대기 후 ground_altitude 설정."""
+        import numpy as np
+        print(f"[Sensor] Waiting for barometer stabilization ({wait_sec}s)...")
+        time.sleep(wait_sec)
+        samples = [self.baro.altitude for _ in range(50)]
+        self.ground_altitude = sum(samples) / len(samples)
+        std = np.std(samples)
+        self.ground_altitude_ready = True
+        print(f"[Sensor] Ground altitude set: {self.ground_altitude:.2f} m (std={std:.3f}m)")
 
     def _read_gps(self) -> dict:
         """GPS에서 lat, lon, altitude 읽기"""
