@@ -6,6 +6,7 @@ import logging
 import math
 import time
 from onboard.system.config import (
+    GIMBAL_MOCK,
     GIMBAL_ALPHA, GIMBAL_SLEW, GIMBAL_LIM,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
@@ -15,6 +16,7 @@ from onboard.system.config import (
 logger = logging.getLogger("onboard.gimbal")
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
+MOCK          = GIMBAL_MOCK
 ALPHA         = GIMBAL_ALPHA
 SLEW          = GIMBAL_SLEW
 LIM           = GIMBAL_LIM
@@ -68,28 +70,42 @@ def _calibrate_gyro(bus, MPU_ADDR: int, i2c_lock) -> tuple:
 
 
 def gimbal_loop(running: list, i2c_lock) -> None:
-    # pigpio는 데몬(pigpiod) 기반이라 Debian trixie부터 apt 저장소에서 빠져
-    # 설치가 안 된다 (pip pigpio 클라이언트만 있어도 데몬이 없으면 무용지물).
-    # 데몬 없이 커널 gpiochip 캐릭터 디바이스로 직접 동작하는 lgpio로 대체.
+    # GIMBAL_MOCK=True면 서보/GPIO(lgpio) 제어는 전부 건너뛰고 로그만 남긴다.
+    # IMU는 mock 여부와 무관하게 항상 smbus2로 실제 센서에서 읽는다.
     try:
         import smbus2
-        import lgpio
     except ImportError as e:
         logger.error("Gimbal: library not found: %s", e)
         return
+
+    lgpio = None
+    if not MOCK:
+        # pigpio는 데몬(pigpiod) 기반이라 Debian trixie부터 apt 저장소에서 빠져
+        # 설치가 안 된다 (pip pigpio 클라이언트만 있어도 데몬이 없으면 무용지물).
+        # 데몬 없이 커널 gpiochip 캐릭터 디바이스로 직접 동작하는 lgpio로 대체.
+        try:
+            import lgpio as _lgpio
+            lgpio = _lgpio
+        except ImportError as e:
+            logger.error("Gimbal: library not found: %s", e)
+            return
 
     MPU_ADDR = 0x68
     bus = smbus2.SMBus(1)
     with i2c_lock:
         bus.write_byte_data(MPU_ADDR, 0x6B, 0)  # 슬립 해제
 
-    try:
-        h = lgpio.gpiochip_open(0)
-        lgpio.gpio_claim_output(h, PIN_ROLL)
-        lgpio.gpio_claim_output(h, PIN_PITCH)
-    except Exception as e:
-        logger.error("Gimbal: lgpio gpiochip open failed: %s", e)
-        return
+    h = None
+    if MOCK:
+        logger.info("Gimbal: GIMBAL_MOCK=True — servo/GPIO control skipped, logging only")
+    else:
+        try:
+            h = lgpio.gpiochip_open(0)
+            lgpio.gpio_claim_output(h, PIN_ROLL)
+            lgpio.gpio_claim_output(h, PIN_PITCH)
+        except Exception as e:
+            logger.error("Gimbal: lgpio gpiochip open failed: %s", e)
+            return
 
     # 자이로 바이어스 측정
     bias_gx, bias_gy = _calibrate_gyro(bus, MPU_ADDR, i2c_lock)
@@ -97,11 +113,13 @@ def gimbal_loop(running: list, i2c_lock) -> None:
     # 상보필터 초기값
     roll, pitch = 0.0, 0.0
     cmd = {"roll": 0.0, "pitch": 0.0}
+    tick = 0
 
     logger.info("Gimbal loop started (50Hz)")
 
     while running[0]:
         loop_start = time.monotonic()
+        tick += 1
 
         try:
             ax, ay, az, gx, gy = _read_raw(bus, MPU_ADDR, i2c_lock)
@@ -128,8 +146,16 @@ def gimbal_loop(running: list, i2c_lock) -> None:
                 step   = _clamp(target - cmd[ax_name], -SLEW, SLEW)
                 cmd[ax_name] += step
 
-            lgpio.tx_servo(h, PIN_ROLL,  int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0))
-            lgpio.tx_servo(h, PIN_PITCH, int(NEUTRAL_PITCH + cmd["pitch"] * 10.0))
+            servo_roll  = int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
+            servo_pitch = int(NEUTRAL_PITCH + cmd["pitch"] * 10.0)
+
+            if MOCK:
+                if tick % 50 == 0:  # 50Hz 루프에서 매 틱 로그는 과함 — 약 1초 간격으로 downsample
+                    logger.info("Gimbal (mock): roll=%.2f pitch=%.2f -> servo_roll=%d servo_pitch=%d",
+                                g_roll, g_pitch, servo_roll, servo_pitch)
+            else:
+                lgpio.tx_servo(h, PIN_ROLL,  servo_roll)
+                lgpio.tx_servo(h, PIN_PITCH, servo_pitch)
 
         except Exception as e:
             logger.error("Gimbal loop error: %s", e)
@@ -138,12 +164,15 @@ def gimbal_loop(running: list, i2c_lock) -> None:
         time.sleep(max(0.0, DT-elapsed))
 
     # 종료 시 서보 중립 복귀 후 PWM 정지
-    lgpio.tx_servo(h, PIN_ROLL,  NEUTRAL_ROLL)
-    lgpio.tx_servo(h, PIN_PITCH, NEUTRAL_PITCH)
-    time.sleep(0.3)  # 중립 위치로 복귀할 시간 확보
-    lgpio.tx_servo(h, PIN_ROLL,  0)
-    lgpio.tx_servo(h, PIN_PITCH, 0)
-    lgpio.gpio_free(h, PIN_ROLL)
-    lgpio.gpio_free(h, PIN_PITCH)
-    lgpio.gpiochip_close(h)
+    if MOCK:
+        logger.info("Gimbal (mock): servo neutral return skipped")
+    else:
+        lgpio.tx_servo(h, PIN_ROLL,  NEUTRAL_ROLL)
+        lgpio.tx_servo(h, PIN_PITCH, NEUTRAL_PITCH)
+        time.sleep(0.3)  # 중립 위치로 복귀할 시간 확보
+        lgpio.tx_servo(h, PIN_ROLL,  0)
+        lgpio.tx_servo(h, PIN_PITCH, 0)
+        lgpio.gpio_free(h, PIN_ROLL)
+        lgpio.gpio_free(h, PIN_PITCH)
+        lgpio.gpiochip_close(h)
     logger.info("Gimbal loop stopped")
