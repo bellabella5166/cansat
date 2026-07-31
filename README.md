@@ -126,10 +126,10 @@ HEADER(2) | TYPE(1) | SEQ(2) | LENGTH(2) | PAYLOAD(n) | CRC16(2)
 
 ## Pi4 이식 시 수정사항
 
-1. `onboard/config.py`에서 `MOCK_MODE = False`
-2. `onboard/config.py`에서 포트 확인:
-   - `XBEE_PORT = "/dev/ttyUSB0"`
-   - `GPS_PORT = "/dev/ttyAMA0"`
+1. `onboard/system/config.py`에서 `MOCK_MODE = False`
+2. `onboard/system/config.py`에서 포트 확인:
+   - `XBEE_PORT = "/dev/ttyAMA1"` (dtoverlay=uart2 → GPIO0/1, 27/28번 핀)
+   - `GPS_PORT = "/dev/ttyS0"` (GPIO14/15, 8/10번 핀)
 3. `models/yolov8n.onnx` 추가
 4. SD카드 마운트 경로로 IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR 수정
 5. BNO055 gyro 단위 확인 (rad/s vs °/s)

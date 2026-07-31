@@ -29,7 +29,7 @@ MODEL_PATH = "models/yolov8n.onnx"
 CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값
 
 # ===== 통신 설정 =====
-XBEE_PORT = "/dev/ttyUSB0"    # XBee 포트 (Pi4 기준)
+XBEE_PORT = "/dev/ttyAMA1"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀))
 XBEE_BAUDRATE = 9600          # XBee 보드레이트
 MAX_RETRY = 5                 # 최대 재전송 횟수
 
