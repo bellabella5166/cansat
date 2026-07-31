@@ -64,7 +64,14 @@ class Sensor:
         self._yaw = 0.0
         self.baro = None
         self.gps = None
-        self._last_gps = {...}
+        self._last_gps = {
+            'lat': 0.0,
+            'lon': 0.0,
+            'gps_altitude': 0.0,
+            'satellites': 0,
+            'fix_quality': 0,
+            'hdop': 99.9,
+        }
         self.ground_altitude = 0.0
         self.ground_altitude_ready = False  # 안정화 완료 여부
 
