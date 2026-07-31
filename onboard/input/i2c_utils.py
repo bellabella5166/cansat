@@ -58,27 +58,27 @@ class I2CRetryHelper:
 
         주의: Pi4 실기에서 GPIO(BCM3)↔I2C 커널 드라이버 핀먹스 전환이
         실제로 의도대로 동작하는지는 아직 실측 검증 전 — 추후 조정 예정.
+
+        pigpio는 데몬(pigpiod) 기반이라 Debian trixie부터 apt 저장소에서
+        빠져 설치가 안 된다 — 데몬 없이 커널 gpiochip 캐릭터 디바이스로
+        직접 동작하는 lgpio를 사용한다.
         """
         reset_time = time.strftime("%Y-%m-%d %H:%M:%S")
         print(f"[I2C:{self._name}] bus lockup detected "
               f"({self._lockup_threshold} consecutive failures) — resetting bus at {reset_time}")
         try:
-            import pigpio
+            import lgpio
             SCL_BCM = 3  # I2C-1 SCL (Pi4 physical pin 5)
 
-            pi = pigpio.pi()
-            if not pi.connected:
-                print(f"[I2C:{self._name}] bus reset failed: pigpio daemon not running")
-                return
-
-            pi.set_mode(SCL_BCM, pigpio.OUTPUT)
+            h = lgpio.gpiochip_open(0)
+            lgpio.gpio_claim_output(h, SCL_BCM, 1)
             for _ in range(9):
-                pi.write(SCL_BCM, 1)
+                lgpio.gpio_write(h, SCL_BCM, 1)
                 time.sleep(0.00001)
-                pi.write(SCL_BCM, 0)
+                lgpio.gpio_write(h, SCL_BCM, 0)
                 time.sleep(0.00001)
-            pi.set_mode(SCL_BCM, pigpio.INPUT)  # 커널 I2C 드라이버에 핀 반환
-            pi.stop()
+            lgpio.gpio_free(h, SCL_BCM)  # 커널 I2C 드라이버에 핀 반환
+            lgpio.gpiochip_close(h)
             print(f"[I2C:{self._name}] bus reset complete")
         except Exception as e:
             print(f"[I2C:{self._name}] bus reset failed: {e}")

@@ -106,16 +106,21 @@ class Sensor:
 
     def _init_sensors(self):
         """실제 센서 초기화 (Pi4 전용)"""
-        # BNO055 IMU 초기화
         import adafruit_bmp3xx
         import board
-        self.imu = mpu6050(0x68)
-        i2c = board.I2C()
 
-        # BMP388 Barometer 초기화
-        self.baro = adafruit_bmp3xx.BMP3XX_I2C(i2c)
-        self.baro.pressure_oversampling = 8
-        self.baro.temperature_oversampling = 2
+        # 현재는 main.py가 다른 스레드를 띄우기 전에 이 초기화를 동기 실행하므로
+        # 실질적인 경합은 없지만, 향후 시작 순서가 바뀌어도 안전하도록
+        # 공유 I2C 버스 접근(IMU/Baro)을 락으로 감싼다.
+        with self._i2c_lock:
+            # BNO055 IMU 초기화
+            self.imu = mpu6050(0x68)
+            i2c = board.I2C()
+
+            # BMP388 Barometer 초기화
+            self.baro = adafruit_bmp3xx.BMP3XX_I2C(i2c)
+            self.baro.pressure_oversampling = 8
+            self.baro.temperature_oversampling = 2
 
         # GPS 초기화
         self.gps = serial.Serial(GPS_PORT, baudrate=GPS_BAUDRATE, timeout=1)

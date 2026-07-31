@@ -14,7 +14,7 @@ picamera2
 
 # 센서 (Pi4에서만 설치)
 smbus2>=0.6.0
-pigpio
+lgpio                        # 서보 PWM/GPIO 제어. pigpio는 데몬 필요 + Debian trixie부터 apt에서 빠져서 대체
 adafruit-blinka              # board/busio 제공 — adafruit-circuitpython-bmp3xx가 필요로 함
 adafruit-circuitpython-bmp3xx
 mpu6050-raspberrypi

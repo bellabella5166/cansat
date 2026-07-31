@@ -68,9 +68,12 @@ def _calibrate_gyro(bus, MPU_ADDR: int, i2c_lock) -> tuple:
 
 
 def gimbal_loop(running: list, i2c_lock) -> None:
+    # pigpio는 데몬(pigpiod) 기반이라 Debian trixie부터 apt 저장소에서 빠져
+    # 설치가 안 된다 (pip pigpio 클라이언트만 있어도 데몬이 없으면 무용지물).
+    # 데몬 없이 커널 gpiochip 캐릭터 디바이스로 직접 동작하는 lgpio로 대체.
     try:
         import smbus2
-        import pigpio
+        import lgpio
     except ImportError as e:
         logger.error("Gimbal: library not found: %s", e)
         return
@@ -80,9 +83,12 @@ def gimbal_loop(running: list, i2c_lock) -> None:
     with i2c_lock:
         bus.write_byte_data(MPU_ADDR, 0x6B, 0)  # 슬립 해제
 
-    pi = pigpio.pi()
-    if not pi.connected:
-        logger.error("Gimbal: pigpio daemon not running")
+    try:
+        h = lgpio.gpiochip_open(0)
+        lgpio.gpio_claim_output(h, PIN_ROLL)
+        lgpio.gpio_claim_output(h, PIN_PITCH)
+    except Exception as e:
+        logger.error("Gimbal: lgpio gpiochip open failed: %s", e)
         return
 
     # 자이로 바이어스 측정
@@ -122,8 +128,8 @@ def gimbal_loop(running: list, i2c_lock) -> None:
                 step   = _clamp(target - cmd[ax_name], -SLEW, SLEW)
                 cmd[ax_name] += step
 
-            pi.set_servo_pulsewidth(PIN_ROLL,  NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
-            pi.set_servo_pulsewidth(PIN_PITCH, NEUTRAL_PITCH + cmd["pitch"] * 10.0)
+            lgpio.tx_servo(h, PIN_ROLL,  int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0))
+            lgpio.tx_servo(h, PIN_PITCH, int(NEUTRAL_PITCH + cmd["pitch"] * 10.0))
 
         except Exception as e:
             logger.error("Gimbal loop error: %s", e)
@@ -131,8 +137,13 @@ def gimbal_loop(running: list, i2c_lock) -> None:
         elapsed = time.monotonic() - loop_start
         time.sleep(max(0.0, DT-elapsed))
 
-    # 종료 시 서보 중립 복귀
-    pi.set_servo_pulsewidth(PIN_ROLL,  NEUTRAL_ROLL)
-    pi.set_servo_pulsewidth(PIN_PITCH, NEUTRAL_PITCH)
-    pi.stop()
+    # 종료 시 서보 중립 복귀 후 PWM 정지
+    lgpio.tx_servo(h, PIN_ROLL,  NEUTRAL_ROLL)
+    lgpio.tx_servo(h, PIN_PITCH, NEUTRAL_PITCH)
+    time.sleep(0.3)  # 중립 위치로 복귀할 시간 확보
+    lgpio.tx_servo(h, PIN_ROLL,  0)
+    lgpio.tx_servo(h, PIN_PITCH, 0)
+    lgpio.gpio_free(h, PIN_ROLL)
+    lgpio.gpio_free(h, PIN_PITCH)
+    lgpio.gpiochip_close(h)
     logger.info("Gimbal loop stopped")
