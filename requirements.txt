@@ -1,4 +1,5 @@
-# ── 온보드 (Raspberry Pi 4) requirements ──
+# ── 온보드 (Raspberry Pi 4, ARM64/aarch64) requirements ──
+# NVIDIA GPU 없음 / CUDA 미사용. 전부 CPU 전용, YOLO 추론은 ONNX Runtime(CPUExecutionProvider)만 사용.
 # pip install -r requirements.txt --break-system-packages
 
 # 핵심
@@ -7,15 +8,18 @@ opencv-python>=4.13.0
 pillow>=12.0.0
 pyserial>=3.5
 
+# 카메라 (Pi4 CSI, picamera2)
+# libcamera 바인딩 문제로 pip 설치가 안 되면 시스템 패키지로 설치: sudo apt install -y python3-picamera2
+picamera2
+
 # 센서 (Pi4에서만 설치)
 smbus2>=0.6.0
 pigpio
+adafruit-blinka              # board/busio 제공 — adafruit-circuitpython-bmp3xx가 필요로 함
 adafruit-circuitpython-bmp3xx
 mpu6050-raspberrypi
 smbus
 pynmea2>=1.19.0
 
-# AI 추론
+# AI 추론 (CPU 전용 ONNX Runtime — ultralytics/torch 불필요, detector.py가 onnxruntime.InferenceSession만 직접 사용)
 onnxruntime>=1.26.0
-
-ultralytics>=8.0
