@@ -117,7 +117,7 @@ class SensorPreprocess:
 
         filtered = {}
         int_keys = ['satellites', 'fix_quality']
-        skip_keys = ['lat', 'lon', 'gps_altitude']
+        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag', 'lat', 'lon', 'gps_altitude']
 
         for key, value in data.items():
             if key in skip_keys:

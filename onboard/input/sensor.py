@@ -2,6 +2,7 @@ import os
 import csv
 import numpy as np
 import time
+import math
 from onboard.input.timestamp_manager import get_timestamp, format_timestamp
 from onboard.system.config import (
     MOCK_MODE,
@@ -10,14 +11,13 @@ from onboard.system.config import (
     GPS_BAUDRATE,
     BARO_SENTINEL,
 )
-import math
 
 # Pi4 환경에서만 import
 try:
-    from mpu6050 import mpu6050
-    MPU6050_AVAILABLE = True
+    import adafruit_bno055
+    BNO055_AVAILABLE = True
 except ImportError:
-    MPU6050_AVAILABLE = False
+    BNO055_AVAILABLE = False
 
 try:
     import adafruit_bmp3xx
@@ -46,10 +46,8 @@ class Sensor:
             mock (bool): True면 Mock 모드 (로컬 테스트용)
         """
         self.save_dir = save_dir
-        self.mock = mock or not (MPU6050_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
+        self.mock = mock or not (BNO055_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
         self.imu = None
-        self._last_gyro_time = None
-        self._yaw = 0.0
         self.baro = None
         self.gps = None
         self._last_gps = {
@@ -85,6 +83,7 @@ class Sensor:
                     'pressure', 'temp', 'baro_altitude',
                     'accel_x', 'accel_y', 'accel_z',
                     'gyro_x', 'gyro_y', 'gyro_z',
+                    'calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag',
                     'satellites', 'fix_quality', 'hdop',
                 ])
 
@@ -93,9 +92,10 @@ class Sensor:
         import adafruit_bmp3xx
         import board
 
-        # BNO055 IMU 초기화
-        self.imu = mpu6050(0x68)
         i2c = board.I2C()
+
+        # BNO055 IMU 초기화
+        self.imu = adafruit_bno055.BNO055_I2C(i2c)
 
         # BMP388 Barometer 초기화
         self.baro = adafruit_bmp3xx.BMP3XX_I2C(i2c)
@@ -106,33 +106,26 @@ class Sensor:
         self.gps = serial.Serial(GPS_PORT, baudrate=GPS_BAUDRATE, timeout=1)
 
     def _read_imu(self) -> dict:
-        accel_data = self.imu.get_accel_data()
-        gyro_data  = self.imu.get_gyro_data()
-
-        ax = accel_data['x']
-        ay = accel_data['y']
-        az = accel_data['z']
-        roll  = math.degrees(math.atan2(ay, az))
-        pitch = math.degrees(math.atan2(-ax, math.sqrt(ay**2 + az**2)))
-
-        now = time.monotonic()
-        if self._last_gyro_time is None:
-            self._last_gyro_time = now
-        dt = now - self._last_gyro_time
-        self._last_gyro_time = now
-        self._yaw += gyro_data['z'] * dt
-        self._yaw %= 360.0
+        heading, roll, pitch = self.imu.euler
+        ax, ay, az = self.imu.linear_acceleration
+        gx, gy, gz = self.imu.gyro  # BNO055는 rad/s로 반환 → deg/s로 변환
+        gx, gy, gz = math.degrees(gx), math.degrees(gy), math.degrees(gz)
+        calib_sys, calib_gyro, calib_accel, calib_mag = self.imu.calibration_status
 
         return {
-            'roll':    roll,
-            'pitch':   pitch,
-            'yaw':     self._yaw,
-            'accel_x': ax,
-            'accel_y': ay,
-            'accel_z': az,
-            'gyro_x':  gyro_data['x'],
-            'gyro_y':  gyro_data['y'],
-            'gyro_z':  gyro_data['z'],
+            'roll':        roll,
+            'pitch':       pitch,
+            'yaw':         heading,
+            'accel_x':     ax,
+            'accel_y':     ay,
+            'accel_z':     az,
+            'gyro_x':      gx,
+            'gyro_y':      gy,
+            'gyro_z':      gz,
+            'calib_sys':   calib_sys,
+            'calib_gyro':  calib_gyro,
+            'calib_accel': calib_accel,
+            'calib_mag':   calib_mag,
         }
 
     def _read_baro(self) -> dict:
@@ -198,6 +191,10 @@ class Sensor:
             'gyro_x': np.random.uniform(-1.0, 1.0),
             'gyro_y': np.random.uniform(-1.0, 1.0),
             'gyro_z': np.random.uniform(-1.0, 1.0),
+            'calib_sys': 3,
+            'calib_gyro': 3,
+            'calib_accel': 3,
+            'calib_mag': 3,
             'satellites': int(np.random.randint(4, 12)),
             'fix_quality': 1,
             'hdop': float(np.random.uniform(0.8, 2.0)),
@@ -235,6 +232,7 @@ class Sensor:
                     data['pressure'], data['temp'], data['baro_altitude'],
                     data['accel_x'], data['accel_y'], data['accel_z'],
                     data['gyro_x'], data['gyro_y'], data['gyro_z'],
+                    data['calib_sys'], data['calib_gyro'], data['calib_accel'], data['calib_mag'],
                     data['satellites'], data['fix_quality'], data['hdop'],])
             return data, timestamp
 

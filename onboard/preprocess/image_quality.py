@@ -10,8 +10,7 @@ from onboard.system.config import (
 class ImageQuality:
     """
     이미지 품질을 판별한다.
-    라플라시안 분산(블러), 노출 이상으로 품질을 판단한다.
-    (IMU 자세각 융합은 설계상 제외됨)
+    라플라시안 분산(블러), 노출 이상, IMU(BNO055) 캘리브레이션 상태로 품질을 판단한다.
     """
 
     def check(self, image: np.ndarray, imu: dict) -> tuple:
@@ -20,7 +19,7 @@ class ImageQuality:
 
         Args:
             image (np.ndarray): 입력 이미지 (H×W×3, RGB)
-            imu (dict): 현재 미사용 (IMU 자세각 융합 제외됨, 호출부 시그니처 호환용으로만 유지)
+            imu (dict): IMU 데이터 (calib_sys 포함)
 
         Returns:
             tuple: (quality: bool, laplacian_score: float)
@@ -42,6 +41,12 @@ class ImageQuality:
 
         if mean_brightness > EXPOSURE_HIGH:
             print(f"[ImageQuality] ❌ brightness excess : brightness={mean_brightness:.2f}")
+            return False, laplacian_score
+
+        # 3. IMU(BNO055) 캘리브레이션 상태 체크
+        calib_sys = imu.get('calib_sys', 3)
+        if calib_sys < 1:
+            print(f"[ImageQuality] ❌ IMU calibration low: calib_sys={calib_sys}")
             return False, laplacian_score
 
         return True, laplacian_score

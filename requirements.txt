@@ -15,10 +15,9 @@ picamera2
 # 센서 (Pi4에서만 설치)
 smbus2>=0.6.0
 lgpio                        # 서보 PWM/GPIO 제어. pigpio는 데몬 필요 + Debian trixie부터 apt에서 빠져서 대체
-adafruit-blinka              # board/busio 제공 — adafruit-circuitpython-bmp3xx가 필요로 함
+adafruit-blinka              # board/busio 제공 — adafruit-circuitpython-bmp3xx/bno055가 필요로 함
 adafruit-circuitpython-bmp3xx
-mpu6050-raspberrypi
-smbus
+adafruit-circuitpython-bno055
 pynmea2>=1.19.0
 
 # AI 추론 (CPU 전용 ONNX Runtime — ultralytics/torch 불필요, detector.py가 onnxruntime.InferenceSession만 직접 사용)
