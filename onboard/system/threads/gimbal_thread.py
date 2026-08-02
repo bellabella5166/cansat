@@ -3,21 +3,19 @@
 from __future__ import annotations
 
 import logging
-import math
 import time
 from onboard.system.config import (
     GIMBAL_MOCK,
-    GIMBAL_ALPHA, GIMBAL_SLEW, GIMBAL_LIM,
+    GIMBAL_SLEW, GIMBAL_LIM,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
-    GIMBAL_DT, GIMBAL_BIAS_SAMPLES,
+    GIMBAL_DT,
 )
 
 logger = logging.getLogger("onboard.gimbal")
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 MOCK          = GIMBAL_MOCK
-ALPHA         = GIMBAL_ALPHA
 SLEW          = GIMBAL_SLEW
 LIM           = GIMBAL_LIM
 PIN_ROLL      = GIMBAL_PIN_ROLL
@@ -25,51 +23,26 @@ PIN_PITCH     = GIMBAL_PIN_PITCH
 NEUTRAL_ROLL  = GIMBAL_NEUTRAL_ROLL
 NEUTRAL_PITCH = GIMBAL_NEUTRAL_PITCH
 DT            = GIMBAL_DT
-BIAS_SAMPLES  = GIMBAL_BIAS_SAMPLES
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _read_raw(bus, MPU_ADDR: int) -> tuple:
-    """MPU6050에서 가속도/자이로 원시값 읽기"""
-    def read_word(reg):
-        h = bus.read_byte_data(MPU_ADDR, reg)
-        l = bus.read_byte_data(MPU_ADDR, reg + 1)
-        v = (h << 8) + l
-        return v - 65536 if v >= 0x8000 else v
+def gimbal_loop(running: list, i2c_lock, imu) -> None:
+    """
+    BNO055는 칩 내부에서 9축 센서 퓨전을 직접 수행해 roll/pitch를 바로
+    제공하므로, MPU6050 때처럼 raw accel/gyro로 상보필터를 직접 계산할
+    필요가 없다 (sensor.py의 _read_imu()와 동일하게 .euler를 그대로 사용).
 
-    ax = read_word(0x3B) / 16384.0
-    ay = read_word(0x3D) / 16384.0
-    az = read_word(0x3F) / 16384.0
-    gx = read_word(0x43) / 131.0  # deg/s
-    gy = read_word(0x45) / 131.0
-    return ax, ay, az, gx, gy
-
-
-def _calibrate_gyro(bus, MPU_ADDR: int) -> tuple:
-    """부팅 시 자이로 바이어스 측정 (3초간 정지 상태)"""
-    logger.info("Gimbal: calibrating gyro bias (3s, keep still)...")
-    gx_sum, gy_sum = 0.0, 0.0
-    for _ in range(BIAS_SAMPLES):
-        _, _, _, gx, gy = _read_raw(bus, MPU_ADDR)
-        gx_sum += gx
-        gy_sum += gy
-        time.sleep(DT)
-    bias_gx = gx_sum / BIAS_SAMPLES
-    bias_gy = gy_sum / BIAS_SAMPLES
-    logger.info("Gimbal: gyro bias gx=%.4f, gy=%.4f", bias_gx, bias_gy)
-    return bias_gx, bias_gy
-
-
-def gimbal_loop(running: list) -> None:
-    # GIMBAL_MOCK=True면 서보/GPIO(lgpio) 제어는 전부 건너뛰고 로그만 남긴다.
-    # IMU는 mock 여부와 무관하게 항상 smbus2로 실제 센서에서 읽는다.
-    try:
-        import smbus2
-    except ImportError as e:
-        logger.error("Gimbal: library not found: %s", e)
+    imu는 sensor.py의 Sensor가 만든 BNO055_I2C 인스턴스를 그대로 공유
+    받는다 — 여기서 별도로 새 BNO055_I2C()를 만들면 생성자가 칩을 다시
+    리셋해서 Sensor 쪽이 쌓아온 캘리브레이션 상태를 날릴 수 있기 때문.
+    같은 물리 I2C 버스를 다른 스레드(sensor_thread)와 동시에 쓰므로
+    공유 i2c_lock으로 접근을 감싼다.
+    """
+    if imu is None:
+        logger.error("Gimbal: IMU not available (Sensor가 mock 모드이거나 초기화 실패)")
         return
 
     lgpio = None
@@ -84,10 +57,6 @@ def gimbal_loop(running: list) -> None:
             logger.error("Gimbal: library not found: %s", e)
             return
 
-    MPU_ADDR = 0x68
-    bus = smbus2.SMBus(1)
-    bus.write_byte_data(MPU_ADDR, 0x6B, 0)  # 슬립 해제
-
     h = None
     if MOCK:
         logger.info("Gimbal: GIMBAL_MOCK=True — servo/GPIO control skipped, logging only")
@@ -100,11 +69,6 @@ def gimbal_loop(running: list) -> None:
             logger.error("Gimbal: lgpio gpiochip open failed: %s", e)
             return
 
-    # 자이로 바이어스 측정
-    bias_gx, bias_gy = _calibrate_gyro(bus, MPU_ADDR)
-
-    # 상보필터 초기값
-    roll, pitch = 0.0, 0.0
     cmd = {"roll": 0.0, "pitch": 0.0}
     tick = 0
 
@@ -115,19 +79,11 @@ def gimbal_loop(running: list) -> None:
         tick += 1
 
         try:
-            ax, ay, az, gx, gy = _read_raw(bus, MPU_ADDR)
+            with i2c_lock:
+                _, roll, pitch = imu.euler
 
-            # 자이로 바이어스 제거
-            gx -= bias_gx
-            gy -= bias_gy
-
-            # 가속도 기반 각도
-            roll_acc  = math.degrees(math.atan2(ay, az))
-            pitch_acc = math.degrees(math.atan2(-ax, math.sqrt(ay**2 + az**2)))
-
-            # 상보필터
-            roll  = ALPHA * (roll  + gx * DT) + (1 - ALPHA) * roll_acc
-            pitch = ALPHA * (pitch + gy * DT) + (1 - ALPHA) * pitch_acc
+            if roll is None or pitch is None:
+                raise ValueError("BNO055 euler not ready yet")
 
             # 45도 축변환 (짐벌 장착 방향)
             g_roll  = (roll - pitch) * 0.7071

@@ -32,7 +32,30 @@ class Camera:
         os.makedirs(self.save_dir, exist_ok=True)
 
         if not self.mock:
-            self._init_camera()
+            self._init_camera_with_retry()
+
+    def _init_camera_with_retry(self, retry_count: int = 3, retry_delay_s: float = 1.5) -> None:
+        """카메라 초기화를 몇 번 재시도하고, 그래도 실패하면 mock으로 폴백한다.
+
+        여기서 예외가 그냥 새어나가면 Camera() 생성자가 죽고, main()이
+        스레드를 하나도 못 띄운 채 프로그램 전체가 시작도 못 한다.
+        리본 케이블이 살짝 흔들린 정도의 일시적 문제는 재시도로 풀리는
+        경우가 많고, 그래도 안 되면 mock으로 내려가서 센서/통신 등
+        나머지 파이프라인은 계속 돌게 한다.
+        """
+        last_exc = None
+        for attempt in range(1, retry_count + 1):
+            try:
+                self._init_camera()
+                return
+            except Exception as e:
+                last_exc = e
+                print(f"[Camera] init failed (attempt {attempt}/{retry_count}): {e}")
+                self.camera = None
+                if attempt < retry_count:
+                    time.sleep(retry_delay_s)
+        print(f"[Camera] init failed after {retry_count} attempts, falling back to mock mode: {last_exc}")
+        self.mock = True
 
     def _init_camera(self):
         """Picamera2 초기화"""

@@ -126,13 +126,20 @@ def enqueue(q: queue.PriorityQueue, ptype: PacketType,
             logger.debug("Queue full (%s), packet dropped", ptype.name)
             return
         _type_counts[ptype] += 1
-    raw = encode_packet(Packet(ptype=ptype, seq=seq.next(), payload=payload))
     try:
+        raw = encode_packet(Packet(ptype=ptype, seq=seq.next(), payload=payload))
         q.put_nowait(TxItem(_PRIORITY.get(ptype, 99), ptype, raw))
     except queue.Full:
         with _type_counts_lock:
             _type_counts[ptype] -= 1
         logger.warning("TX queue full: %s dropped", ptype.name)
+    except Exception as e:
+        # encode_packet()이 실패하는 경우까지 포함 — 여기서 카운터를 안 내리면
+        # _type_counts가 실제보다 영원히 높게 남아서, chunk_thread.py의
+        # "다 보낼 때까지 대기" 같은 루프가 절대 안 끝나는 대기에 빠질 수 있다.
+        with _type_counts_lock:
+            _type_counts[ptype] -= 1
+        logger.error("Encode/enqueue error (%s): %s", ptype.name, e)
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():
@@ -150,10 +157,14 @@ def main():
     os.makedirs(SENSOR_SAVE_DIR, exist_ok=True)
     os.makedirs(LOG_SAVE_DIR,    exist_ok=True)
 
+    # calibrate_ground_altitude()가 별도 스레드에서 self.baro를 직접 읽는 동안
+    # sensor_thread도 동시에 같은 I2C 버스를 읽지 않도록 공유 Lock 사용.
+    i2c_lock = threading.Lock()
+
     # 모듈 초기화
     id_mgr       = IDManager()
     camera       = Camera(mock=MOCK_MODE)
-    sensor       = Sensor(mock=MOCK_MODE)
+    sensor       = Sensor(mock=MOCK_MODE, i2c_lock=i2c_lock)
     validator    = ImageValidator()
     quality      = ImageQuality()
     preprocessor = ImagePreprocess()
@@ -214,7 +225,7 @@ def main():
             ),
             threading.Thread(
                 target=gimbal_loop,
-                args=(running,),
+                args=(running, i2c_lock, sensor.imu),
                 daemon=True, name="gimbal"
             ),
             threading.Thread(
@@ -234,40 +245,51 @@ def main():
         last_power_report = time.monotonic()
 
         while running[0]:
+            # 이 while 루프는 메인 스레드라 여기서 예외가 새어나가면 프로세스
+            # 전체가 죽는다. 개별 구간에 이미 try/except가 있어도, 앞으로
+            # 코드가 바뀌며 새로 생길 수 있는 예외까지 다 막아줄 최후의
+            # 안전망으로 루프 전체를 한 번 더 감싼다 — 무슨 일이 있어도
+            # 이 루프 자체는 절대 멈추지 않아야 한다.
             try:
-                item = tx_q.get(timeout=0.1)
-            except queue.Empty:
-                item = None
-
-            if item is not None:
-                with _type_counts_lock:
-                    _type_counts[item.ptype] -= 1
                 try:
-                    serial.write(item.raw)
-                    n = len(item.raw)
-                    bytes_sent   += n
-                    packets_sent += 1
-                    total_duration_s += n * 8 / XBEE_BAUDRATE  # 송신 시간 누적
-                except Exception as e:
-                    logger.error("Serial write error: %s", e)
+                    item = tx_q.get(timeout=0.1)
+                except queue.Empty:
+                    item = None
 
-            # POWER 패킷 주기적 송신
-            now = time.monotonic()
-            if now - last_power_report >= POWER_REPORT_INTERVAL:
-                energy_mwh = (XBEE_VOLTAGE_V * XBEE_CURRENT_MA * total_duration_s) / 3600000.0
-                pd = CommPowerData(
-                    timestamp    = time.time(),
-                    voltage_v    = XBEE_VOLTAGE_V,
-                    current_ma   = XBEE_CURRENT_MA,
-                    duration_s   = total_duration_s,
-                    energy_mwh   = energy_mwh,
-                    bytes_sent   = bytes_sent,
-                    packets_sent = packets_sent,
-                )
-                enqueue(tx_q, PacketType.POWER, pd.to_bytes(), seq, 5)
-                logger.info("POWER: duration=%.2fs, energy=%.4fmWh, bytes=%d",
-                            total_duration_s, energy_mwh, bytes_sent)
-                last_power_report = now
+                if item is not None:
+                    with _type_counts_lock:
+                        _type_counts[item.ptype] -= 1
+                    try:
+                        serial.write(item.raw)
+                        n = len(item.raw)
+                        bytes_sent   += n
+                        packets_sent += 1
+                        total_duration_s += n * 8 / XBEE_BAUDRATE  # 송신 시간 누적
+                    except Exception as e:
+                        logger.error("Serial write error: %s", e)
+
+                # POWER 패킷 주기적 송신
+                now = time.monotonic()
+                if now - last_power_report >= POWER_REPORT_INTERVAL:
+                    try:
+                        energy_mwh = (XBEE_VOLTAGE_V * XBEE_CURRENT_MA * total_duration_s) / 3600000.0
+                        pd = CommPowerData(
+                            timestamp    = time.time(),
+                            voltage_v    = XBEE_VOLTAGE_V,
+                            current_ma   = XBEE_CURRENT_MA,
+                            duration_s   = total_duration_s,
+                            energy_mwh   = energy_mwh,
+                            bytes_sent   = bytes_sent,
+                            packets_sent = packets_sent,
+                        )
+                        enqueue(tx_q, PacketType.POWER, pd.to_bytes(), seq, 5)
+                        logger.info("POWER: duration=%.2fs, energy=%.4fmWh, bytes=%d",
+                                    total_duration_s, energy_mwh, bytes_sent)
+                    except Exception as e:
+                        logger.error("POWER packet error: %s", e)
+                    last_power_report = now
+            except Exception as e:
+                logger.error("Main TX loop error (caught, continuing): %s", e)
 
         camera.close()
         sensor.close()
@@ -278,8 +300,15 @@ def main():
     if COMM_MOCK:
         _run(serial, running)
     else:
-        with XBeeSerial(XBEE_PORT, XBEE_BAUDRATE) as serial:
-            _run(serial, running)
+        try:
+            with XBeeSerial(XBEE_PORT, XBEE_BAUDRATE) as serial:
+                _run(serial, running)
+        except Exception as e:
+            # XBee가 재시도까지 다 실패해도, 카메라/센서/로컬 CSV 기록 같은
+            # 나머지 파이프라인은 계속 돌게 한다 — 무선 통신이 완전히
+            # 죽더라도 SD카드에는 데이터가 남아야 한다 (0보다는 낫다).
+            logger.error("XBee connection failed after retries, running with no radio comm: %s", e)
+            _run(MockSerial(), running)
 
 
 if __name__ == "__main__":

@@ -9,9 +9,18 @@ class RepresentativeSelector:
     2순위: laplacian_score가 가장 높은 이미지
     """
 
-    def __init__(self):
+    def __init__(self, max_candidates: int = 60):
+        """
+        Args:
+            max_candidates (int): 후보로 보관할 최대 이미지 수. 체크포인트가
+                (극단적으로) 한 번도 안 터지면 매 프레임(1fps)마다 원본
+                이미지가 계속 쌓여 메모리가 무한정 늘어날 수 있어, 오래된
+                후보부터 버리는 상한을 둔다.
+        """
         # {image_id: {'image': np.ndarray, 'confidences': list, 'laplacian_score': float}}
         self._candidates = {}
+        self._order = []  # 삽입 순서 (오래된 것부터 제거하기 위함)
+        self._max_candidates = max_candidates
 
     def add(self, image_id: str, image: np.ndarray,
             detections: list, laplacian_score: float):
@@ -29,11 +38,17 @@ class RepresentativeSelector:
 
         confidences = [det['confidence'] for det in detections]
 
+        if image_id not in self._candidates:
+            self._order.append(image_id)
         self._candidates[image_id] = {
             'image': image,
             'confidences': confidences,
             'laplacian_score': laplacian_score
         }
+
+        while len(self._candidates) > self._max_candidates:
+            oldest_id = self._order.pop(0)
+            self._candidates.pop(oldest_id, None)
 
     def select(self) -> tuple:
         """
@@ -64,5 +79,6 @@ class RepresentativeSelector:
         return self._candidates[best_id]['image'], best_id
 
     def reset(self):
-        """후보 초기화 (테스트 용도)"""
+        """후보 초기화 (체크포인트 발동 후 다음 체크포인트를 위해 호출)"""
         self._candidates = {}
+        self._order = []

@@ -30,23 +30,29 @@ def nack_loop(serial, tx_q: queue.PriorityQueue, seq,
             continue
 
         if raw:
-            for pkt in parser.feed(raw):
-                if pkt.ptype == PacketType.NACK:
-                    try:
-                        img_id, missing = decode_nack(pkt.payload)
-                        cnt = retry_counts.get(img_id, 0) + 1
-                        retry_counts[img_id] = cnt
-                        if cnt <= MAX_RETRY:
-                            logger.info(
-                                "NACK received: image_id=%d missing=%s (retry %d/%d)",
-                                img_id, missing, cnt, MAX_RETRY
-                            )
-                        else:
-                            logger.warning(
-                                "image_id=%d max retry exceeded", img_id
-                            )
-                    except Exception as e:
-                        logger.error("NACK decode error: %s", e)
+            try:
+                for pkt in parser.feed(raw):
+                    if pkt.ptype == PacketType.NACK:
+                        try:
+                            img_id, missing = decode_nack(pkt.payload)
+                            cnt = retry_counts.get(img_id, 0) + 1
+                            retry_counts[img_id] = cnt
+                            if cnt <= MAX_RETRY:
+                                logger.info(
+                                    "NACK received: image_id=%d missing=%s (retry %d/%d)",
+                                    img_id, missing, cnt, MAX_RETRY
+                                )
+                            else:
+                                logger.warning(
+                                    "image_id=%d max retry exceeded", img_id
+                                )
+                        except Exception as e:
+                            logger.error("NACK decode error: %s", e)
+            except Exception as e:
+                # parser.feed() 자체(스트림 파싱)가 예상 못한 예외를 던져도
+                # nack_loop 전체가 죽지 않도록 방어.
+                logger.error("Packet parse error: %s", e)
+                parser.reset()
 
         time.sleep(0.005)
 
