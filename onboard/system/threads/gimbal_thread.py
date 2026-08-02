@@ -98,11 +98,14 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             servo_roll  = int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
             servo_pitch = int(NEUTRAL_PITCH + cmd["pitch"] * 10.0)
 
-            if MOCK:
-                if tick % 50 == 0:  # 50Hz 루프에서 매 틱 로그는 과함 — 약 1초 간격으로 downsample
-                    logger.info("Gimbal (mock): roll=%.2f pitch=%.2f -> servo_roll=%d servo_pitch=%d",
-                                g_roll, g_pitch, servo_roll, servo_pitch)
-            else:
+            # 50Hz 루프에서 매 틱 로그는 과하니 약 1초 간격으로만 downsample.
+            # mock 여부와 무관하게 항상 남긴다 — 실제 서보 동작 중에도 사후에
+            # "그 순간 roll/pitch가 뭐였는지" 추적할 수 있어야 한다.
+            if tick % 50 == 0:
+                logger.info("Gimbal: roll=%.2f pitch=%.2f -> servo_roll=%d servo_pitch=%d",
+                            g_roll, g_pitch, servo_roll, servo_pitch)
+
+            if not MOCK:
                 lgpio.tx_servo(h, PIN_ROLL,  servo_roll)
                 lgpio.tx_servo(h, PIN_PITCH, servo_pitch)
 
