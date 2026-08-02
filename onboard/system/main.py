@@ -150,14 +150,10 @@ def main():
     os.makedirs(SENSOR_SAVE_DIR, exist_ok=True)
     os.makedirs(LOG_SAVE_DIR,    exist_ok=True)
 
-    # IMU(MPU6050)/Baro(BMP388)가 공유하는 물리 I2C 버스 보호용 Lock.
-    # gimbal_thread도 같은 IMU를 별도 스레드에서 직접 읽으므로 반드시 공유해야 한다.
-    i2c_lock = threading.Lock()
-
     # 모듈 초기화
     id_mgr       = IDManager()
     camera       = Camera(mock=MOCK_MODE)
-    sensor       = Sensor(mock=MOCK_MODE, i2c_lock=i2c_lock)
+    sensor       = Sensor(mock=MOCK_MODE)
     validator    = ImageValidator()
     quality      = ImageQuality()
     preprocessor = ImagePreprocess()
@@ -218,7 +214,7 @@ def main():
             ),
             threading.Thread(
                 target=gimbal_loop,
-                args=(running, i2c_lock),
+                args=(running,),
                 daemon=True, name="gimbal"
             ),
             threading.Thread(

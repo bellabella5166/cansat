@@ -32,34 +32,28 @@ def _clamp(v: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, v))
 
 
-def _read_raw(bus, MPU_ADDR: int, i2c_lock) -> tuple:
-    """MPU6050에서 가속도/자이로 원시값 읽기.
-
-    같은 IMU를 sensor.py(sensor_thread)도 같은 물리 I2C 버스로 읽으므로,
-    스레드 간 충돌을 막기 위해 공유 i2c_lock으로 레지스터 읽기 구간
-    전체를 감싼다.
-    """
+def _read_raw(bus, MPU_ADDR: int) -> tuple:
+    """MPU6050에서 가속도/자이로 원시값 읽기"""
     def read_word(reg):
         h = bus.read_byte_data(MPU_ADDR, reg)
         l = bus.read_byte_data(MPU_ADDR, reg + 1)
         v = (h << 8) + l
         return v - 65536 if v >= 0x8000 else v
 
-    with i2c_lock:
-        ax = read_word(0x3B) / 16384.0
-        ay = read_word(0x3D) / 16384.0
-        az = read_word(0x3F) / 16384.0
-        gx = read_word(0x43) / 131.0  # deg/s
-        gy = read_word(0x45) / 131.0
+    ax = read_word(0x3B) / 16384.0
+    ay = read_word(0x3D) / 16384.0
+    az = read_word(0x3F) / 16384.0
+    gx = read_word(0x43) / 131.0  # deg/s
+    gy = read_word(0x45) / 131.0
     return ax, ay, az, gx, gy
 
 
-def _calibrate_gyro(bus, MPU_ADDR: int, i2c_lock) -> tuple:
+def _calibrate_gyro(bus, MPU_ADDR: int) -> tuple:
     """부팅 시 자이로 바이어스 측정 (3초간 정지 상태)"""
     logger.info("Gimbal: calibrating gyro bias (3s, keep still)...")
     gx_sum, gy_sum = 0.0, 0.0
     for _ in range(BIAS_SAMPLES):
-        _, _, _, gx, gy = _read_raw(bus, MPU_ADDR, i2c_lock)
+        _, _, _, gx, gy = _read_raw(bus, MPU_ADDR)
         gx_sum += gx
         gy_sum += gy
         time.sleep(DT)
@@ -69,7 +63,7 @@ def _calibrate_gyro(bus, MPU_ADDR: int, i2c_lock) -> tuple:
     return bias_gx, bias_gy
 
 
-def gimbal_loop(running: list, i2c_lock) -> None:
+def gimbal_loop(running: list) -> None:
     # GIMBAL_MOCK=True면 서보/GPIO(lgpio) 제어는 전부 건너뛰고 로그만 남긴다.
     # IMU는 mock 여부와 무관하게 항상 smbus2로 실제 센서에서 읽는다.
     try:
@@ -92,8 +86,7 @@ def gimbal_loop(running: list, i2c_lock) -> None:
 
     MPU_ADDR = 0x68
     bus = smbus2.SMBus(1)
-    with i2c_lock:
-        bus.write_byte_data(MPU_ADDR, 0x6B, 0)  # 슬립 해제
+    bus.write_byte_data(MPU_ADDR, 0x6B, 0)  # 슬립 해제
 
     h = None
     if MOCK:
@@ -108,7 +101,7 @@ def gimbal_loop(running: list, i2c_lock) -> None:
             return
 
     # 자이로 바이어스 측정
-    bias_gx, bias_gy = _calibrate_gyro(bus, MPU_ADDR, i2c_lock)
+    bias_gx, bias_gy = _calibrate_gyro(bus, MPU_ADDR)
 
     # 상보필터 초기값
     roll, pitch = 0.0, 0.0
@@ -122,7 +115,7 @@ def gimbal_loop(running: list, i2c_lock) -> None:
         tick += 1
 
         try:
-            ax, ay, az, gx, gy = _read_raw(bus, MPU_ADDR, i2c_lock)
+            ax, ay, az, gx, gy = _read_raw(bus, MPU_ADDR)
 
             # 자이로 바이어스 제거
             gx -= bias_gx

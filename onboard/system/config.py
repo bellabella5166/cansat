@@ -62,16 +62,6 @@ BARO_MAX_JUMP = 50.0          # 연속 샘플 간 허용 최대 고도 변화(m)
 GPS_PORT = "/dev/ttyS0"   # GPS 포트 (Pi4 기준)
 GPS_BAUDRATE = 9600          # GPS 보드레이트
 
-# ===== I2C 버스 공유(IMU/Baro) 소프트웨어 완화 설정 =====
-# MPU6050(IMU)과 BMP388(Baro)가 같은 물리 I2C 버스(bus 1)를 공유해 가끔
-# 읽기 실패가 발생 — 부품 고장이 아니라 버스 공유 구조상 특성(버스 락업,
-# 접촉 불량, 클럭 스트레칭 충돌)으로 판단. 아래 값은 임의값이며 추후
-# 실측(실패 빈도/지속시간) 기반으로 조정 예정.
-I2C_RETRY_COUNT = 3         # 읽기 실패 시 재시도 횟수
-I2C_RETRY_DELAY_S = 0.01    # 재시도 사이 delay (초)
-I2C_LOCKUP_THRESHOLD = 10   # 연속 실패가 이 횟수 넘으면 버스 락업으로 판단, SCL 비트뱅잉 소프트 리셋 수행
-# fallback 유지 시간은 고도 트리거 판정 기준과 동일하게 SENSOR_FAILURE_TIMEOUT_S를 재사용
-
 # ===== 센서 전처리 설정 =====
 SENSOR_LOWPASS_ALPHA = 0.2    # low-pass filter 계수 (0~1)
 # ===== GPS 필터링 설정 =====
