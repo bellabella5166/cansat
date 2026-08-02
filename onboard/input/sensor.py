@@ -17,7 +17,7 @@ try:
     import adafruit_bno055
     BNO055_AVAILABLE = True
 except ImportError:
-    BNO055_AVAILABLE = False
+    BNO055_AVAILABLE =False
 
 try:
     import adafruit_bmp3xx
