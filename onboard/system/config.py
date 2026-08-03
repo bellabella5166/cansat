@@ -27,7 +27,7 @@ EXPOSURE_HIGH = 220           # 노출 과다 임계값 (0~255)
 
 # ===== YOLO 설정 =====
 MODEL_PATH = "models/yolov8n.onnx"
-CONFIDENCE_THRESHOLD = 0.7    # 신뢰도 임계값
+CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값
 
 # ===== 통신 설정 =====
 XBEE_PORT = "/dev/ttyAMA2"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀)) — 재부팅 후 stty로 실제 값 검증 필요
