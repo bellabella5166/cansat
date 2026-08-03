@@ -30,7 +30,7 @@ MODEL_PATH = "models/yolov8n.onnx"
 CONFIDENCE_THRESHOLD = 0.7    # 신뢰도 임계값
 
 # ===== 통신 설정 =====
-XBEE_PORT = "/dev/ttyAMA1"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀))
+XBEE_PORT = "/dev/ttyAMA2"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀)) — 재부팅 후 stty로 실제 값 검증 필요
 XBEE_BAUDRATE = 9600          # XBee 보드레이트
 MAX_RETRY = 5                 # 최대 재전송 횟수
 
@@ -58,8 +58,11 @@ BARO_FREEZE_WINDOW = 10       # 정지(freeze) 판단 샘플 수 (10Hz 기준 1�
 BARO_FREEZE_EPS = 0.05        # 이 값(m) 이하 변화가 WINDOW 동안 지속되면 정지로 판단
 BARO_MAX_JUMP = 50.0          # 연속 샘플 간 허용 최대 고도 변화(m), 초과 시 이상치
 
-# config.py에 추가
-GPS_PORT = "/dev/ttyS0"   # GPS 포트 (Pi4 기준)
+# GPS 포트 (Pi4 기준). /dev/serial0는 블루투스 활성화 여부에 따라 가리키는
+# 대상이 바뀌는 심볼릭 링크라, /boot/firmware/config.txt에 dtoverlay=disable-bt
+# + sudo systemctl disable hciuart 가 반드시 같이 적용돼 있어야 한다
+# (README "Pi4 이식 시 수정사항" 참고).
+GPS_PORT = "/dev/serial0"    # 기본 UART (GPIO14/15)
 GPS_BAUDRATE = 9600          # GPS 보드레이트
 
 # ===== 센서 전처리 설정 =====
