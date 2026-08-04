@@ -37,6 +37,7 @@ from onboard.detection.detector                import Detector
 from onboard.detection.detection_logger        import DetectionLogger
 from onboard.detection.representative_selector import RepresentativeSelector
 from onboard.detection.time_trigger            import TimeTrigger
+from onboard.detection.chunk_cache             import ChunkCache
 from onboard.system.threads.sensor_thread      import sensor_loop
 from onboard.system.threads.image_thread       import image_loop
 from onboard.system.threads.chunk_thread       import image_chunk_loop
@@ -51,7 +52,8 @@ from onboard.system.config import (
     XBEE_PORT, XBEE_BAUDRATE, QUALITY_SAVE_DIR,
     CAMERA_FPS,
     MAX_RETRY,
-    IMAGE_SEND_INTERVAL_S,
+    IMAGE_SEND_INTERVAL_S, IMAGE_SEND_TIMEOUT_S,
+    CHUNK_CACHE_MAX_IMAGES, CHUNK_CACHE_TTL_S,
     XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
 )
 
@@ -79,6 +81,11 @@ _PRIORITY = {
     PacketType.IMG:       4,
     PacketType.POWER:     2,
 }
+# NACK으로 재요청된 청크는 신규 이미지 청크(IMG=4)보다 먼저 나가게 한다 —
+# 이미 절반쯤 도착한 이미지를 완성시키는 게, 새 이미지를 처음부터 또 보내는
+# 것보다 대역폭 대비 효율이 좋다. YOLO_META(3)과 동률이라 SENSOR/POWER(2)
+# 같은 하우스키핑 트래픽은 여전히 항상 먼저 나간다.
+IMG_RETRANSMIT_PRIORITY = 3
 
 # ── 큐 최대 크기 ──────────────────────────────────────────────────────────────
 SENSOR_Q_MAX = 20
@@ -92,6 +99,11 @@ class TxItem:
     priority: int
     ptype: PacketType = field(compare=False)
     raw: bytes = field(compare=False)
+    # 이 아이템이 tx_q에서 빠져나갈 때(전송 성공 여부와 무관하게) 호출되는 콜백.
+    # chunk_thread가 "내가 보낸 이미지 자신의 청크가 다 빠졌는지"를 전역
+    # _type_counts(다른 이미지의 재전송 청크까지 섞여 있음)가 아니라 이미지별로
+    # 독립적으로 추적하기 위해 사용한다.
+    on_dequeue: object = field(default=None, compare=False)
 
 
 # ── 시퀀스 카운터 (thread-safe) ───────────────────────────────────────────────
@@ -110,30 +122,28 @@ _type_counts = defaultdict(int)
 _type_counts_lock = threading.Lock()
 
 
-def _img_pending() -> int:
-    with _type_counts_lock:
-        return _type_counts[PacketType.IMG]
-
-
 # ── 큐 enqueue 헬퍼 ───────────────────────────────────────────────────────────
 def enqueue(q: queue.PriorityQueue, ptype: PacketType,
-            payload: bytes, seq: SeqCounter, max_size: int) -> None:
+            payload: bytes, seq: SeqCounter, max_size: int,
+            priority: int | None = None, on_dequeue=None) -> None:
     with _type_counts_lock:
         if _type_counts[ptype] >= max_size:
-            logger.debug("Queue full (%s), packet dropped", ptype.name)
+            logger.warning("Queue full (%s, %d/%d), packet dropped",
+                            ptype.name, _type_counts[ptype], max_size)
             return
         _type_counts[ptype] += 1
     try:
         raw = encode_packet(Packet(ptype=ptype, seq=seq.next(), payload=payload))
-        q.put_nowait(TxItem(_PRIORITY.get(ptype, 99), ptype, raw))
+        p = priority if priority is not None else _PRIORITY.get(ptype, 99)
+        q.put_nowait(TxItem(p, ptype, raw, on_dequeue))
     except queue.Full:
         with _type_counts_lock:
             _type_counts[ptype] -= 1
         logger.warning("TX queue full: %s dropped", ptype.name)
     except Exception as e:
         # encode_packet()이 실패하는 경우까지 포함 — 여기서 카운터를 안 내리면
-        # _type_counts가 실제보다 영원히 높게 남아서, chunk_thread.py의
-        # "다 보낼 때까지 대기" 같은 루프가 절대 안 끝나는 대기에 빠질 수 있다.
+        # _type_counts가 실제보다 영원히 높게 남아서 큐가 가득 찬 것처럼 보이는
+        # 상태가 영구화될 수 있다.
         with _type_counts_lock:
             _type_counts[ptype] -= 1
         logger.error("Encode/enqueue error (%s): %s", ptype.name, e)
@@ -171,6 +181,7 @@ def main():
     det_log      = DetectionLogger()
     selector     = RepresentativeSelector()
     time_trigger = TimeTrigger(IMAGE_SEND_INTERVAL_S)
+    chunk_cache  = ChunkCache(CHUNK_CACHE_MAX_IMAGES, CHUNK_CACHE_TTL_S)
 
     tx_q    = queue.PriorityQueue()
     sensor_q = queue.Queue(maxsize=5)
@@ -204,12 +215,13 @@ def main():
             ),
             threading.Thread(
                 target=image_chunk_loop,
-                args=(tx_q, seq, img_q, running, enqueue, img_sending, _img_pending),
+                args=(tx_q, seq, img_q, running, enqueue, img_sending, chunk_cache,
+                        IMAGE_SEND_TIMEOUT_S),
                 daemon=True, name="img_chunk"
             ),
             threading.Thread(
                 target=nack_loop,
-                args=(serial, tx_q, seq, running),
+                args=(serial, tx_q, seq, running, chunk_cache, enqueue, IMG_RETRANSMIT_PRIORITY),
                 daemon=True, name="nack"
             ),
             threading.Thread(
@@ -253,6 +265,11 @@ def main():
                 if item is not None:
                     with _type_counts_lock:
                         _type_counts[item.ptype] -= 1
+                    if item.on_dequeue is not None:
+                        try:
+                            item.on_dequeue()
+                        except Exception as e:
+                            logger.error("on_dequeue callback error: %s", e)
                     try:
                         serial.write(item.raw)
                         n = len(item.raw)
