@@ -31,7 +31,7 @@ CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값 — 이 이상은 전부 저
 BBOX_DRAW_THRESHOLD = 0.8     # 시각화 이미지에 bbox를 "그리는" 최소 신뢰도 — 바닥 등 오탐 표시만 줄임, 데이터 자체는 그대로 저장
 
 # ===== 통신 설정 =====
-XBEE_PORT = "/dev/ttyAMA2"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀)) — 재부팅 후 stty로 실제 값 검증 필요
+XBEE_PORT = "/dev/ttyUSB0"    # XBee 포트 — USB 어댑터로 연결 (GPIO 직결 uart2/ttyAMA2에서 다시 USB로 변경됨)
 XBEE_BAUDRATE = 9600          # XBee 보드레이트
 MAX_RETRY = 5                 # 최대 재전송 횟수
 
