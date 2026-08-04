@@ -6,7 +6,7 @@ import logging
 import time
 from onboard.system.config import (
     GIMBAL_MOCK,
-    GIMBAL_SLEW, GIMBAL_LIM,
+    GIMBAL_SLEW, GIMBAL_LIM, GIMBAL_DEADBAND,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
     GIMBAL_DT,
@@ -18,6 +18,7 @@ logger = logging.getLogger("onboard.gimbal")
 MOCK          = GIMBAL_MOCK
 SLEW          = GIMBAL_SLEW
 LIM           = GIMBAL_LIM
+DEADBAND      = GIMBAL_DEADBAND
 PIN_ROLL      = GIMBAL_PIN_ROLL
 PIN_PITCH     = GIMBAL_PIN_PITCH
 NEUTRAL_ROLL  = GIMBAL_NEUTRAL_ROLL
@@ -92,11 +93,17 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             # 서보 제어
             for ax_name, ang in (("roll", g_roll), ("pitch", g_pitch)):
                 target = _clamp(-ang, -LIM, LIM)  # 반대 방향 보상
-                step   = _clamp(target - cmd[ax_name], -SLEW, SLEW)
+                error  = target - cmd[ax_name]
+
+                if abs(error) < DEADBAND:
+                    step = 0
+                else:
+                    step = _clamp(error, -SLEW, SLEW)
+
                 cmd[ax_name] += step
 
-            servo_roll  = int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
-            servo_pitch = int(NEUTRAL_PITCH + cmd["pitch"] * 10.0)
+            servo_roll  = round(NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
+            servo_pitch = round(NEUTRAL_PITCH + cmd["pitch"] * 10.0)
 
             # 50Hz 루프에서 매 틱 로그는 과하니 약 1초 간격으로만 downsample.
             # mock 여부와 무관하게 항상 남긴다 — 실제 서보 동작 중에도 사후에
