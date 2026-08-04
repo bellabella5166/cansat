@@ -7,57 +7,26 @@ from onboard.system.config import (
 )
 
 
-# ==============================
-# Servo 설정
-# ==============================
-
 PIN_ROLL = GIMBAL_PIN_ROLL
 PIN_PITCH = GIMBAL_PIN_PITCH
 
-# 초기 중립 PWM
-NEUTRAL_ROLL = 1500
-NEUTRAL_PITCH = 1500
 
-# 1도당 PWM 변화량
-US_PER_DEG = 10
-
-# 중립 튜닝 step
-NEUTRAL_STEP = 5
+# 시작 중립값
+neutral_roll = 1500
+neutral_pitch = 1500
 
 
-# 안전 범위
-MIN_US = 500
-MAX_US = 2500
+# 조정 단위
+STEP = 5
 
 
-# 현재 각도
-roll_deg = 0
-pitch_deg = 0
-
-
-# ==============================
-# 함수
-# ==============================
-
-def clamp(v, lo, hi):
+def clamp(v, lo=500, hi=2500):
     return max(lo, min(hi, v))
 
 
-def angle_to_pwm(neutral, angle):
-    pwm = neutral + angle * US_PER_DEG
-    return int(clamp(pwm, MIN_US, MAX_US))
-
-
 def send_servo(h):
-    roll_pwm = angle_to_pwm(
-        NEUTRAL_ROLL,
-        roll_deg
-    )
-
-    pitch_pwm = angle_to_pwm(
-        NEUTRAL_PITCH,
-        pitch_deg
-    )
+    roll_pwm = clamp(neutral_roll)
+    pitch_pwm = clamp(neutral_pitch)
 
     lgpio.tx_servo(
         h,
@@ -72,16 +41,10 @@ def send_servo(h):
     )
 
     print(
-        f"Roll={roll_deg:+d}° "
-        f"(PWM {roll_pwm}us), "
-        f"Pitch={pitch_deg:+d}° "
-        f"(PWM {pitch_pwm}us)"
+        f"Roll PWM={roll_pwm}us, "
+        f"Pitch PWM={pitch_pwm}us"
     )
 
-
-# ==============================
-# Main
-# ==============================
 
 h = None
 
@@ -98,7 +61,8 @@ try:
         PIN_PITCH
     )
 
-    print("Servo test start")
+
+    print("=== Neutral tuning mode ===")
 
     send_servo(h)
 
@@ -107,124 +71,61 @@ try:
 
         cmd = input(
             "\n"
-            "[1]-Roll  [2]+Roll  "
-            "[3]-Pitch [4]+Pitch\n"
-            "[r]Roll0  [t]Pitch0 "
-            "[c]Center\n"
-            "[z]Roll neutral- "
-            "[x]Roll neutral+\n"
-            "[v]Pitch neutral- "
-            "[b]Pitch neutral+\n"
-            "[q]Quit\n"
+            "[z] Roll PWM -5us\n"
+            "[x] Roll PWM +5us\n"
+            "[v] Pitch PWM -5us\n"
+            "[b] Pitch PWM +5us\n"
+            "[c] Current value\n"
+            "[q] Quit\n"
             "> "
         )
 
 
-        # ----------------------
-        # 각도 이동
-        # ----------------------
+        if cmd == "z":
+            neutral_roll -= STEP
+            send_servo(h)
 
-        if cmd == "1":
-            roll_deg -= 1
-
-        elif cmd == "2":
-            roll_deg += 1
-
-        elif cmd == "3":
-            pitch_deg -= 1
-
-        elif cmd == "4":
-            pitch_deg += 1
-
-
-        # ----------------------
-        # 각도 초기화
-        # ----------------------
-
-        elif cmd == "r":
-            roll_deg = 0
-
-        elif cmd == "t":
-            pitch_deg = 0
-
-        elif cmd == "c":
-            roll_deg = 0
-            pitch_deg = 0
-
-
-        # ----------------------
-        # 중립 PWM 튜닝
-        # ----------------------
-
-        elif cmd == "z":
-            NEUTRAL_ROLL -= NEUTRAL_STEP
-            print(
-                "NEUTRAL_ROLL =",
-                NEUTRAL_ROLL
-            )
 
         elif cmd == "x":
-            NEUTRAL_ROLL += NEUTRAL_STEP
-            print(
-                "NEUTRAL_ROLL =",
-                NEUTRAL_ROLL
-            )
+            neutral_roll += STEP
+            send_servo(h)
 
 
         elif cmd == "v":
-            NEUTRAL_PITCH -= NEUTRAL_STEP
-            print(
-                "NEUTRAL_PITCH =",
-                NEUTRAL_PITCH
-            )
+            neutral_pitch -= STEP
+            send_servo(h)
+
 
         elif cmd == "b":
-            NEUTRAL_PITCH += NEUTRAL_STEP
+            neutral_pitch += STEP
+            send_servo(h)
+
+
+        elif cmd == "c":
             print(
-                "NEUTRAL_PITCH =",
-                NEUTRAL_PITCH
+                f"Current:\n"
+                f"Roll={neutral_roll}us\n"
+                f"Pitch={neutral_pitch}us"
             )
 
-
-        # ----------------------
-        # 종료
-        # ----------------------
 
         elif cmd == "q":
             break
+
 
         else:
             print("Unknown command")
 
 
-        send_servo(h)
-
-
-
 except KeyboardInterrupt:
-    print("\nInterrupted")
+    pass
 
 
 finally:
 
     if h is not None:
 
-        # 중립 복귀
-        lgpio.tx_servo(
-            h,
-            PIN_ROLL,
-            NEUTRAL_ROLL
-        )
-
-        lgpio.tx_servo(
-            h,
-            PIN_PITCH,
-            NEUTRAL_PITCH
-        )
-
-        time.sleep(0.3)
-
-        # PWM OFF
+        # 종료 시 현재 중립 위치 유지 후 PWM OFF
         lgpio.tx_servo(
             h,
             PIN_ROLL,
@@ -239,4 +140,5 @@ finally:
 
         lgpio.gpiochip_close(h)
 
-    print("Servo test finished")
+
+print("Finished")
