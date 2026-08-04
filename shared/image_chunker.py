@@ -137,12 +137,22 @@ class ImageReassembler:
     _first_seen:     dict[int, float]            = field(default_factory=dict)
     _last_new_chunk: dict[int, float]             = field(default_factory=dict)
     _retry_counts:   dict[int, int]               = field(default_factory=dict)
+    _completed_ids:  set[int]                     = field(default_factory=set)
 
     def feed(self, image_id: int, chunk_id: int, total: int, data: bytes) -> bytes | None:
         """청크 추가. 모든 청크가 모이면 JPEG bytes 반환, 미완성 시 None.
 
         이미 가지고 있던 chunk_id가 재전송으로 다시 도착해도 같은 키에 덮어쓸
-        뿐이라 중복 저장되지 않는다."""
+        뿐이라 중복 저장되지 않는다.
+
+        이미 완성돼서 버퍼가 지워진 image_id로 뒤늦게 낙오 청크(원본 전송분이
+        저우선순위 큐에 오래 묶여있다 뒤늦게 도착하는 등)가 도착하면, 그걸 "새
+        이미지 수신 시작"으로 오인해 절대 못 채울 유령 버퍼를 만들고 NACK
+        재요청까지 낭비하게 된다 — 이미 완성된 image_id는 조용히 무시한다."""
+        if image_id in self._completed_ids:
+            logger.debug("image_id=%d 낙오 청크(chunk %d) 무시 — 이미 완성됨",
+                         image_id, chunk_id)
+            return None
         now = time.monotonic()
         if image_id not in self._bufs:
             self._bufs[image_id]           = {}

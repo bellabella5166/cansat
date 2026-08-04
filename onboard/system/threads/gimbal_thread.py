@@ -98,7 +98,10 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             g_pitch = (roll + pitch) * 0.7071
 
             # 서보 제어
-            for ax_name, ang in (("roll", g_roll), ("pitch", g_pitch)):
+            # 실측 결과 PIN_ROLL(물리 커넥터)이 실제로는 pitch 방향에 반응하고
+            # PIN_PITCH가 roll 방향에 반응함 — 핀/중립값/리밋은 실측 기반이라
+            # 그대로 두고, 여기서 어느 신호를 어느 축 슬롯에 넣을지만 맞바꿔서 보정.
+            for ax_name, ang in (("roll", g_pitch), ("pitch", g_roll)):
                 lo, hi = LIMITS[ax_name]
                 target = _clamp(-ang, lo, hi)  # 반대 방향 보상
                 error  = target - cmd[ax_name]
