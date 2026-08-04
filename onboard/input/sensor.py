@@ -123,6 +123,14 @@ class Sensor:
         if i2c is not None:
             try:
                 self.imu = adafruit_bno055.BNO055_I2C(i2c)
+                # 기본값(NDOF_MODE)은 지자기계까지 퓨전에 써서 절대방위(yaw)를
+                # 잡아주지만, 짐벌 서보 모터가 IMU 바로 옆에 붙어있어 서보가
+                # 움직일 때마다 지자기계가 전류/자석 간섭을 받아 roll/pitch까지
+                # 같이 흔들리는 원인이 됐다 — 서보 진동 실측 비교로 확인됨.
+                # IMUPLUS_MODE는 가속도+자이로만 써서 이 간섭 경로를 없앤다.
+                # yaw는 텔레메트리 로깅에만 쓰이고 온보드 판단(짐벌 포함)에는
+                # 전혀 안 쓰이므로, 자이로 적분만으로 드리프트되는 대가는 감수 가능.
+                self.imu.mode = adafruit_bno055.IMUPLUS_MODE
             except Exception as e:
                 print(f"[Sensor] BNO055 init failed, IMU will report defaults: {e}")
                 self.imu = None

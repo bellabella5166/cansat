@@ -3,7 +3,7 @@
 # ===== 실행 모드 =====
 MOCK_MODE = False
 COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
-GIMBAL_MOCK = False   # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
+GIMBAL_MOCK = True    # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함 — 테스트용 임시 True, 끝나면 False로 되돌릴 것
 
 # ===== 저장 경로 =====
 import time
