@@ -59,14 +59,19 @@ class AltitudeArbiter:
             and float(processed.get("hdop", 99.9)) <= GPS_MAX_HDOP
         )
 
-    def resolve(self, processed: dict) -> tuple[float, str]:
+    def resolve(self, processed: dict) -> tuple[float | None, str]:
         """
         Args:
             processed (dict): SensorPreprocess 출력 (baro_altitude, gps_altitude,
                                fix_quality, hdop 포함)
 
         Returns:
-            tuple: (altitude_m, source) — source는 "baro" 또는 "gps"
+            tuple: (altitude_m, source) — source는 "baro"/"gps"/"invalid".
+                   baro/GPS 둘 다 단 한 번도 유효했던 적이 없으면(전형적으로
+                   부팅 직후 baro 지상고도 보정이 끝나기 전) altitude_m은
+                   None이다 — 이 시점엔 신뢰할 수 있는 고도 자체가 없으므로,
+                   BARO_SENTINEL 같은 placeholder 숫자를 흘려보내 호출부의
+                   고도 기반 로직(체크포인트 트리거 등)을 오염시키지 않는다.
         """
         baro_alt = processed.get("baro_altitude", BARO_SENTINEL)
         gps_alt  = processed.get("gps_altitude", BARO_SENTINEL)
@@ -89,7 +94,13 @@ class AltitudeArbiter:
             self._using_gps = True
             return gps_alt, "gps"
 
-        # GPS도 불량하면 마지막 신뢰 기준값으로 폴백 (완전 무신호 방지)
+        # GPS도 불량하면 마지막 신뢰 기준값으로 폴백 (완전 무신호 방지).
+        # 단, _last_baro가 아직 한 번도 없었다면(주로 부팅 직후 지상고도
+        # 보정 전) 폴백할 신뢰 기준 자체가 없다는 뜻이라, baro_alt(대개
+        # BARO_SENTINEL)를 그대로 흘려보내지 않고 명시적으로 "무효"를
+        # 반환한다 — 예전엔 여기서 9999.0을 그대로 리턴해 체크포인트
+        # 트리거의 _max_altitude_seen을 영구 오염시키는 버그가 있었다.
         self._using_gps = True
-        fallback = self._last_baro if self._last_baro is not None else baro_alt
-        return fallback, "baro"
+        if self._last_baro is None:
+            return None, "invalid"
+        return self._last_baro, "baro"

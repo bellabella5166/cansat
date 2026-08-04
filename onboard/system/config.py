@@ -27,7 +27,8 @@ EXPOSURE_HIGH = 220           # 노출 과다 임계값 (0~255)
 
 # ===== YOLO 설정 =====
 MODEL_PATH = "models/yolov8n.onnx"
-CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값
+CONFIDENCE_THRESHOLD = 0.5    # 신뢰도 임계값 — 이 이상은 전부 저장/전송(실격 방지, 데이터 손실 없음)
+BBOX_DRAW_THRESHOLD = 0.8     # 시각화 이미지에 bbox를 "그리는" 최소 신뢰도 — 바닥 등 오탐 표시만 줄임, 데이터 자체는 그대로 저장
 
 # ===== 통신 설정 =====
 XBEE_PORT = "/dev/ttyAMA2"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀)) — 재부팅 후 stty로 실제 값 검증 필요
@@ -37,20 +38,11 @@ MAX_RETRY = 5                 # 최대 재전송 횟수
 # ===== 대표 이미지 설정 =====
 REPRESENTATIVE_SIZE = (320, 240)  # 대표 이미지 축소 크기
 
-# ===== 다중 고도 체크포인트 트리거 설정 =====
-# 300m/150m 두 지점에서 각각 대표 이미지 1장씩 전송 (단일 실패 지점 리스크 제거).
-# 간격 산정: 200m 이상 구간 이미지 전송 소요 23초 + 지연 5초 = 28초,
-# 목표 하강속도 2.5m/s 기준 필요 간격 약 90~100m(여유 포함) → 150m 간격이면 충분한 마진.
-# 반드시 고도 내림차순으로 나열해야 한다.
-ALTITUDE_CHECKPOINTS = [1.5, 1.0]
-ALTITUDE_DEBOUNCE_COUNT = 3   # 체크포인트 확정에 필요한 연속 샘플 수 (1fps 이미지 루프 기준 ≈3초, 노이즈 오탐 방지)
-
-# ===== 체크포인트 시간 기반 백업 트리거 설정 =====
-# baro/gps 다중화(AltitudeArbiter)마저 둘 다 SENSOR_FAILURE_TIMEOUT_S 이상 무응답이면
-# "센서 실패"로 보고, 마지막 유효 고도/시각(anchor) 기준 목표 하강속도로 체크포인트
-# 도달 예상 시각을 계산해 시간만으로 발동한다.
-DESCENT_RATE_MPS = 2.9          # 목표 하강 속도 (m/s)
-SENSOR_FAILURE_TIMEOUT_S = 5.0  # baro, gps 각각 이 시간 이상 무응답이면 실패로 판정
+# ===== 시간 기반 대표 이미지 트리거 설정 =====
+# 전원 인가(프로그램 시작) 시점부터 IMAGE_SEND_INTERVAL_S 간격으로 무한 반복해서
+# 대표 이미지 1장씩 전송한다. 고도값을 신뢰하기 어려워 고도 체크포인트 대신
+# 순수 시간 기반으로 전환.
+IMAGE_SEND_INTERVAL_S = 60
 
 # ===== 고도 이중화 트리거 설정 (기압계 우선, 이상 시 GPS로 자동 전환) =====
 BARO_SENTINEL = 9999.0        # 기압계 미보정 상태를 나타내는 sentinel 값

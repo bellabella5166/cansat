@@ -3,7 +3,7 @@ import os
 import csv
 import cv2
 import numpy as np
-from onboard.system.config import IMAGE_SAVE_DIR, SENSOR_SAVE_DIR
+from onboard.system.config import IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, BBOX_DRAW_THRESHOLD
 from onboard.input.timestamp_manager import format_timestamp
 
 
@@ -84,7 +84,13 @@ class DetectionLogger:
             return False
 
     def _save_bbox_image(self, detections: list, raw_image: np.ndarray, timestamp: float):
-        """bbox가 그려진 이미지를 저장한다."""
+        """bbox가 그려진 이미지를 저장한다.
+
+        CSV/텔레메트리에는 CONFIDENCE_THRESHOLD(0.5) 이상 탐지를 전부 남기되,
+        이미지에 실제로 박스를 그리는 건 BBOX_DRAW_THRESHOLD(0.8) 이상만 —
+        낮은 신뢰도(예: 네모난 바닥 오탐)가 시각화 이미지를 어지럽히는 것만
+        줄이고, 데이터 자체(판독/채점용)는 그대로 보존하기 위함이다.
+        """
 
         # 색상 정의
         colors = {'farm': (0, 255, 0), 'building': (0, 0, 255)}
@@ -96,6 +102,9 @@ class DetectionLogger:
         h, w = vis_image.shape[:2]
 
         for det in detections:
+            if det['confidence'] < BBOX_DRAW_THRESHOLD:
+                continue
+
             x1, y1, x2, y2 = det['bbox']
             cls = det['class']
             conf = det['confidence']

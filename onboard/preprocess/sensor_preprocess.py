@@ -110,25 +110,37 @@ class SensorPreprocess:
         """
         low-pass filter를 적용한다.
         y[n] = alpha * x[n] + (1 - alpha) * y[n-1]
+
+        int_keys(satellites/fix_quality)는 출력만 반올림하고, 다음 스텝의
+        y[n-1]로는 반올림 전 실수값을 그대로 이어간다 — 반올림된 값을 그대로
+        누적시키면(예: fix_quality가 한 번 0으로 반올림된 뒤) alpha=0.2 기준
+        0.2*1 + 0.8*0 = 0.2 → round()=0 이 되어 실제 fix_quality=1이 계속
+        들어와도 반올림값이 절대 1로 못 돌아오는 고착 상태에 빠지기 때문이다.
         """
         if self._prev is None:
             self._prev = data.copy()
             return data.copy()
 
         filtered = {}
+        raw_state = {}
         int_keys = ['satellites', 'fix_quality']
-        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag', 'lat', 'lon', 'gps_altitude']
+        # baro_altitude: 지상고도 보정 전 BARO_SENTINEL이 몇 초씩 섞여 나오는 걸
+        # 막기 위해 gps_altitude와 동일하게 필터 미적용(원본 그대로) 처리한다.
+        skip_keys = ['calib_sys', 'calib_gyro', 'calib_accel', 'calib_mag', 'lat', 'lon', 'gps_altitude', 'baro_altitude']
 
         for key, value in data.items():
             if key in skip_keys:
                 filtered[key] = value  # 필터 미적용, 원본 그대로
+                raw_state[key] = value
             elif isinstance(value, (int, float)):
                 new_val = self.alpha * value + (1 - self.alpha) * self._prev.get(key, value)
+                raw_state[key] = new_val
                 filtered[key] = int(round(new_val)) if key in int_keys else new_val
             else:
                 filtered[key] = value
+                raw_state[key] = value
 
-        self._prev = filtered.copy()
+        self._prev = raw_state
         return filtered
 
     def reset(self):

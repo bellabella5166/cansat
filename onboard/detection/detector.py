@@ -4,6 +4,7 @@ from onboard.system.config import (
     MOCK_MODE,
     MODEL_PATH,
     CONFIDENCE_THRESHOLD,
+    PREPROCESS_SIZE,
 )
 
 
@@ -119,11 +120,14 @@ class Detector:
             if confidence < self.confidence_threshold:
                 continue
 
-            # bbox 변환 (center → corner)
-            x1 = float(x_center - w / 2)
-            y1 = float(y_center - h / 2)
-            x2 = float(x_center + w / 2)
-            y2 = float(y_center + h / 2)
+            # bbox 변환 (center → corner). 프레임 경계 근처 탐지는 center±w/2가
+            # 이미지 범위를 벗어날 수 있어(음수 또는 PREPROCESS_SIZE 초과),
+            # 통신 패킷의 x_min/y_min/x_max/y_max가 unsigned short로 인코딩될 때
+            # 깨지는 걸 막기 위해 이미지 범위로 클램핑한다.
+            x1 = float(np.clip(x_center - w / 2, 0, PREPROCESS_SIZE))
+            y1 = float(np.clip(y_center - h / 2, 0, PREPROCESS_SIZE))
+            x2 = float(np.clip(x_center + w / 2, 0, PREPROCESS_SIZE))
+            y2 = float(np.clip(y_center + h / 2, 0, PREPROCESS_SIZE))
 
             if class_id in self.CLASS_NAMES:
                 results.append({

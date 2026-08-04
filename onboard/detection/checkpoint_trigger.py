@@ -16,15 +16,26 @@ class CheckpointTrigger:
     무응답일 때를 위한 시간 기반 백업 트리거다 — 호출 순서(정상 → 백업)로
     우선순위를 정하는 건 호출부(image_thread.py) 책임이며, 이 클래스는 두
     경로 모두 confirm_fired() 한 번으로 함께 정리되는 것만 보장한다.
+
+    poll()은 "현재 고도 <= 체크포인트"만으로 판단하지 않는다 — 지상 대기
+    중이거나 정점(apogee) 전 상승 중에도 이 조건은 트리비얼하게(또는 목표
+    체크포인트 값보다 낮은 고도를 지나가는 것만으로) 만족돼버리기 때문에,
+    "관측된 최고 고도 대비 min_launch_altitude 이상 올라갔었고, 그 최고
+    고도보다 descent_confirm_margin 이상 낮아진 상태"(= 진짜 하강 중)일
+    때만 debounce 카운팅을 시작한다.
     """
 
-    def __init__(self, checkpoints: list[float], debounce_count: int, descent_rate_mps: float):
+    def __init__(self, checkpoints: list[float], debounce_count: int, descent_rate_mps: float,
+                 min_launch_altitude: float, descent_confirm_margin: float):
         self._checkpoints = list(checkpoints)
         self._debounce_count = debounce_count
         self._descent_rate_mps = descent_rate_mps
+        self._min_launch_altitude = min_launch_altitude
+        self._descent_confirm_margin = descent_confirm_margin
         self._idx = 0
         self._counter = 0
         self._armed = False  # 현재 체크포인트 debounce 확정 후 전송(confirm) 대기 중인지
+        self._max_altitude_seen: float | None = None  # 발사/하강 확인 게이트용, 체크포인트 전환과 무관하게 비행 전체에서 계속 갱신
 
         # 시간 기반 백업 트리거 상태 (baro/gps 둘 다 무응답일 때만 사용)
         self._time_armed = False
@@ -50,8 +61,16 @@ class CheckpointTrigger:
         if self.all_done():
             return False
 
+        if self._max_altitude_seen is None or altitude > self._max_altitude_seen:
+            self._max_altitude_seen = altitude
+
+        descended = (
+            self._max_altitude_seen >= self._min_launch_altitude
+            and (self._max_altitude_seen - altitude) >= self._descent_confirm_margin
+        )
+
         target = self._checkpoints[self._idx]
-        if altitude <= target:
+        if descended and altitude <= target:
             self._counter += 1
             if self._counter >= self._debounce_count:
                 self._armed = True
@@ -119,3 +138,4 @@ class CheckpointTrigger:
         self._armed = False
         self._time_armed = False
         self._time_fire_info = None
+        self._max_altitude_seen = None

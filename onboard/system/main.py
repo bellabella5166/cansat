@@ -33,12 +33,10 @@ from onboard.preprocess.image_quality          import ImageQuality
 from onboard.preprocess.image_preprocess       import ImagePreprocess
 from onboard.preprocess.sensor_preprocess      import SensorPreprocess
 from onboard.preprocess.sensor_logger          import SensorLogger
-from onboard.preprocess.altitude_arbiter       import AltitudeArbiter
-from onboard.preprocess.altitude_anchor        import AltitudeAnchor
 from onboard.detection.detector                import Detector
 from onboard.detection.detection_logger        import DetectionLogger
 from onboard.detection.representative_selector import RepresentativeSelector
-from onboard.detection.checkpoint_trigger       import CheckpointTrigger
+from onboard.detection.time_trigger            import TimeTrigger
 from onboard.system.threads.sensor_thread      import sensor_loop
 from onboard.system.threads.image_thread       import image_loop
 from onboard.system.threads.chunk_thread       import image_chunk_loop
@@ -53,8 +51,7 @@ from onboard.system.config import (
     XBEE_PORT, XBEE_BAUDRATE, QUALITY_SAVE_DIR,
     CAMERA_FPS,
     MAX_RETRY,
-    ALTITUDE_CHECKPOINTS, ALTITUDE_DEBOUNCE_COUNT,
-    DESCENT_RATE_MPS, SENSOR_FAILURE_TIMEOUT_S,
+    IMAGE_SEND_INTERVAL_S,
     XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
 )
 
@@ -173,9 +170,7 @@ def main():
     detector     = Detector(mock=MOCK_MODE)
     det_log      = DetectionLogger()
     selector     = RepresentativeSelector()
-    altitude_arbiter  = AltitudeArbiter()
-    checkpoint_trigger = CheckpointTrigger(ALTITUDE_CHECKPOINTS, ALTITUDE_DEBOUNCE_COUNT, DESCENT_RATE_MPS)
-    altitude_anchor    = AltitudeAnchor(SENSOR_FAILURE_TIMEOUT_S)
+    time_trigger = TimeTrigger(IMAGE_SEND_INTERVAL_S)
 
     tx_q    = queue.PriorityQueue()
     sensor_q = queue.Queue(maxsize=5)
@@ -203,9 +198,8 @@ def main():
             threading.Thread(
                 target=image_loop,
                 args=(camera, validator, quality, preprocessor,
-                        detector, det_log, selector, altitude_arbiter,
-                        checkpoint_trigger, altitude_anchor,
-                        tx_q, seq, id_mgr, sensor_q, img_q, running, enqueue, img_sending),
+                        detector, det_log, selector, time_trigger,
+                        tx_q, seq, id_mgr, img_q, running, enqueue, img_sending),
                 daemon=True, name="image"
             ),
             threading.Thread(

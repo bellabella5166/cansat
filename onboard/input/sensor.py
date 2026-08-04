@@ -54,6 +54,10 @@ class Sensor:
         self.save_dir = save_dir
         self.mock = mock or not (BNO055_AVAILABLE and BMP388_AVAILABLE and GPS_AVAILABLE)
         self._i2c_lock = i2c_lock or threading.Lock()
+        # GPS는 I2C가 아니라 시리얼 포트라 _i2c_lock과는 별개 락이 필요하다 —
+        # calibrate_ground_altitude()가 GPS 기준고도 샘플링을 위해 별도 스레드에서
+        # self.gps를 읽는 동안, sensor_thread도 동시에 같은 시리얼 포트를 읽을 수 있다.
+        self._gps_lock = threading.Lock()
         self.imu = None
         self.baro = None
         self.gps = None
@@ -67,6 +71,8 @@ class Sensor:
         }
         self.ground_altitude = 0.0
         self.ground_altitude_ready = False  # 안정화 완료 여부
+        self.ground_gps_altitude = 0.0
+        self.ground_gps_altitude_ready = False  # GPS 지상 기준고도 보정 완료 여부
 
         os.makedirs(self.save_dir, exist_ok=True)
 
@@ -188,7 +194,10 @@ class Sensor:
             }
 
     def calibrate_ground_altitude(self, wait_sec: int = 90) -> None:
-        """별도 스레드에서 호출. 안정화 대기 후 ground_altitude 설정.
+        """별도 스레드에서 호출. 안정화 대기 후 ground_altitude(baro)와
+        ground_gps_altitude(GPS)를 함께 설정한다 — baro가 발사 지점을 0m로
+        잡는 것과 동일한 기준으로 GPS 고도(원래 해발고도)도 상대고도화해서,
+        AltitudeArbiter가 baro↔GPS를 전환해도 같은 기준선을 쓰게 한다.
 
         - 샘플 중 일부가 I2C 읽기 실패로 예외를 던져도 전체 보정이 죽지
           않도록, 실패한 샘플은 건너뛰고 성공한 것만으로 평균을 낸다.
@@ -199,31 +208,51 @@ class Sensor:
           번갈아 실행되어 이 함수가 도는 동안에도 SENSOR 데이터 전송에
           공백이 생기지 않는다. (평균은 샘플이 연속이든 띄엄띄엄이든
           통계적으로 동일하므로 정확도 손해 없음)
+        - GPS는 이 시점까지 fix가 아예 안 잡혀있을 수 있다 — baro와 달리
+          실패해도 baro 보정 자체를 막지 않고, GPS만 계속 미보정(사용 안 함)
+          상태로 남는다 (fix 없이 fallback으로 쓰면 더 위험하므로).
         """
         import numpy as np
         SAMPLE_COUNT = 20
         MIN_VALID = 8
-        print(f"[Sensor] Waiting for barometer stabilization ({wait_sec}s)...")
+        print(f"[Sensor] Waiting for barometer/GPS stabilization ({wait_sec}s)...")
         time.sleep(wait_sec)
-        samples = []
+        baro_samples = []
+        gps_samples = []
         for _ in range(SAMPLE_COUNT):
             try:
                 with self._i2c_lock:
-                    samples.append(self.baro.altitude)
+                    baro_samples.append(self.baro.altitude)
             except Exception as e:
-                print(f"[Sensor] calibration sample read failed, skipping: {e}")
-        if len(samples) < MIN_VALID:
-            print(f"[Sensor] Ground altitude calibration failed: only {len(samples)}/{SAMPLE_COUNT} samples succeeded")
-            return
-        self.ground_altitude = sum(samples) / len(samples)
-        std = np.std(samples)
-        self.ground_altitude_ready = True
-        print(f"[Sensor] Ground altitude set: {self.ground_altitude:.2f} m (std={std:.3f}m, {len(samples)}/{SAMPLE_COUNT} samples)")
+                print(f"[Sensor] baro calibration sample read failed, skipping: {e}")
 
-    def _read_gps(self) -> dict:
-        """GPS에서 lat, lon, altitude 읽기"""
+            gps_raw = self._read_gps_raw()
+            if gps_raw.get('fix_quality', 0) > 0:
+                gps_samples.append(gps_raw['gps_altitude'])
+
+        if len(baro_samples) < MIN_VALID:
+            print(f"[Sensor] Ground baro altitude calibration failed: only {len(baro_samples)}/{SAMPLE_COUNT} samples succeeded")
+        else:
+            self.ground_altitude = sum(baro_samples) / len(baro_samples)
+            std = np.std(baro_samples)
+            self.ground_altitude_ready = True
+            print(f"[Sensor] Ground baro altitude set: {self.ground_altitude:.2f} m (std={std:.3f}m, {len(baro_samples)}/{SAMPLE_COUNT} samples)")
+
+        if len(gps_samples) < MIN_VALID:
+            print(f"[Sensor] Ground GPS altitude calibration failed: only {len(gps_samples)}/{SAMPLE_COUNT} valid fixes — GPS altitude fallback disabled this flight")
+        else:
+            self.ground_gps_altitude = sum(gps_samples) / len(gps_samples)
+            gps_std = np.std(gps_samples)
+            self.ground_gps_altitude_ready = True
+            print(f"[Sensor] Ground GPS altitude set: {self.ground_gps_altitude:.2f} m (std={gps_std:.3f}m, {len(gps_samples)}/{SAMPLE_COUNT} fixes)")
+
+    def _read_gps_raw(self) -> dict:
+        """GPS NMEA를 파싱해 lat/lon/altitude(해발, 보정 전 원시값)를 갱신하고 반환한다.
+        calibrate_ground_altitude()의 기준점 산출과 _read_gps()의 상대고도 변환이
+        공통으로 쓰는 원시 읽기 — 여기서는 지상 기준고도 보정 여부를 따지지 않는다."""
         try:
-            line = self.gps.readline().decode('ascii', errors='replace')
+            with self._gps_lock:
+                line = self.gps.readline().decode('ascii', errors='replace')
             if line.startswith('$GPGGA') or line.startswith('$GNGGA'):
                 msg = pynmea2.parse(line)
                 self._last_gps = {
@@ -234,10 +263,25 @@ class Sensor:
                     'fix_quality': int(msg.gps_qual),
                     'hdop': float(msg.horizontal_dil) if msg.horizontal_dil else 99.9,
                 }
-                return self._last_gps
         except Exception:
             pass
         return self._last_gps
+
+    def _read_gps(self) -> dict:
+        """GPS에서 lat, lon, altitude 읽기.
+
+        baro(발사 지점=0m 기준)와 동일한 기준을 맞추기 위해, gps_altitude는
+        calibrate_ground_altitude()에서 잡은 ground_gps_altitude를 뺀 상대고도로
+        반환한다. 보정 전(ground_gps_altitude_ready=False)에는 baro의
+        BARO_SENTINEL과 같은 취지로 fix_quality를 0으로 강제해, AltitudeArbiter/
+        AltitudeAnchor가 기준 없는 해발고도를 baro와 혼용해 쓰지 않게 한다.
+        """
+        data = dict(self._read_gps_raw())
+        if not self.ground_gps_altitude_ready:
+            data['fix_quality'] = 0
+        else:
+            data['gps_altitude'] = data['gps_altitude'] - self.ground_gps_altitude
+        return data
 
     def _mock_data(self) -> dict:
         """Mock 센서 데이터 생성 (로컬 테스트용)"""
