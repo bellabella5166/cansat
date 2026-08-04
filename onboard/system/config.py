@@ -42,7 +42,7 @@ REPRESENTATIVE_SIZE = (320, 240)  # 대표 이미지 축소 크기
 # 전원 인가(프로그램 시작) 시점부터 IMAGE_SEND_INTERVAL_S 간격으로 무한 반복해서
 # 대표 이미지 1장씩 전송한다. 고도값을 신뢰하기 어려워 고도 체크포인트 대신
 # 순수 시간 기반으로 전환.
-IMAGE_SEND_INTERVAL_S = 60
+IMAGE_SEND_INTERVAL_S = 90
 
 # ===== 고도 이중화 트리거 설정 (기압계 우선, 이상 시 GPS로 자동 전환) =====
 BARO_SENTINEL = 9999.0        # 기압계 미보정 상태를 나타내는 sentinel 값
