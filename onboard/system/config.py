@@ -80,7 +80,20 @@ XBEE_CURRENT_MA = 55.6   # XBee 송신 전류 (mA) = 0.2W / 3.6V
 POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
 
 # ===== 자세 제어 설정 =====
-GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick)
+GIMBAL_SLEW        = 5.0    # 최대 각속도 (deg/tick) — 데드밴드 밖에서는 이 속도로 확 움직임
+
+# BNO055 fused roll/pitch에 거는 저역통과(EMA) 필터 계수. 데드밴드는
+# "언제 멈출지"만 다루는 반면, 이건 target 자체가 센서 노이즈로 흔들리는 걸
+# 애초에 줄인다 — 값이 클수록(1에 가까울수록) 더 부드럽지만 반응이 느려짐.
+# filtered = ALPHA * filtered_prev + (1-ALPHA) * raw
+GIMBAL_FILTER_ALPHA = 0.8
+
+# 재조준 판단 주기(초). IMU 읽기/필터링/서보 신호(PWM) 유지는 계속 50Hz로
+# 돌지만, "새 목표로 움직일지" 판단은 이 주기로만 한다 — CAMERA_FPS=1이라
+# 카메라가 초당 1장만 찍으므로, 그보다 빠르게 재조준해봐야 그 사이엔 찍히는
+# 프레임이 없어 의미가 없다. MG90 같은 저가 서보를 "계속 미세 추적"이 아니라
+# "필요할 때만 굵직하게 재조준"하는 용도로 쓰기 위한 조치.
+GIMBAL_REPOSITION_INTERVAL_S = 1.0
 
 # 서보 각도 제한 (deg, 중립 기준) — roll+pitch 2축을 동시에 구동한 상태로 실측.
 # 각 축을 독립적으로 최대까지 밀면(roll +50.5, pitch +45) 조합에서 구조체에 부딪혀
@@ -96,7 +109,12 @@ GIMBAL_PITCH_LIM_NEG = 10.0   # 피치 - 리밋
 
 GIMBAL_PIN_ROLL    = 18     # 롤 서보 GPIO 핀
 GIMBAL_PIN_PITCH   = 13     # 피치 서보 GPIO 핀
-GIMBAL_DEADBAND    = 0.5
+
+# 축별 데드밴드 (deg) — 이 이하 오차는 무시하고 아예 멈춰서, "확확 바뀌었다가
+# 딱 정지"를 의도대로 만든다. pitch는 가동범위(26.5도)가 roll(74도)보다 훨씬
+# 좁아서 같은 5도를 그대로 쓰면 범위의 20%가 죽어버리므로 축별로 분리.
+GIMBAL_ROLL_DEADBAND  = 5.0
+GIMBAL_PITCH_DEADBAND = 2.5
 
 GIMBAL_NEUTRAL_ROLL  = 1545  # 롤 서보 중립 펄스 (μs)
 GIMBAL_NEUTRAL_PITCH = 1370  # 피치 서보 중립 펄스 (μs)
