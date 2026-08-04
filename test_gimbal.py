@@ -6,7 +6,7 @@ test.py(중립값 튜닝)와 동일한 방식으로 키 입력마다 서보를 0
 방향으로 한 스텝씩 보내다가, 프레임에 닿거나 저항/지지직 소리가
 느껴지는 순간 즉시 [q]로 멈추고 그 직전 [c] 값(중립 대비 각도)을
 기록한다. roll +/-, pitch +/- 총 4방향을 각각 측정해서
-GIMBAL_LIM을 축·방향별로 나누는 데 쓴다.
+GIMBAL_ROLL_LIM_POS/NEG, GIMBAL_PITCH_LIM_POS/NEG를 정하는 데 쓴다.
 """
 import lgpio
 

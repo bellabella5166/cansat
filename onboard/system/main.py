@@ -51,7 +51,6 @@ from onboard.system.config import (
     IMAGE_SAVE_DIR, SENSOR_SAVE_DIR, LOG_SAVE_DIR,
     XBEE_PORT, XBEE_BAUDRATE, QUALITY_SAVE_DIR,
     CAMERA_FPS,
-    MAX_RETRY,
     IMAGE_SEND_INTERVAL_S, IMAGE_SEND_TIMEOUT_S,
     CHUNK_CACHE_MAX_IMAGES, CHUNK_CACHE_TTL_S,
     XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
@@ -125,21 +124,30 @@ _type_counts_lock = threading.Lock()
 # ── 큐 enqueue 헬퍼 ───────────────────────────────────────────────────────────
 def enqueue(q: queue.PriorityQueue, ptype: PacketType,
             payload: bytes, seq: SeqCounter, max_size: int,
-            priority: int | None = None, on_dequeue=None) -> None:
+            priority: int | None = None, on_dequeue=None) -> bool:
+    """성공하면 True, 큐가 가득 찼거나 인코딩에 실패해 등록 못 하면 False를 반환한다.
+
+    호출부(chunk_thread/nack_thread)가 이 반환값 없이는 "몇 개나 실제로 큐에
+    들어갔는지"를 알 수 없어, 등록 실패한 청크까지 "보냈다"고 잘못 기록하거나
+    (chunk_thread의 경우) on_dequeue가 영영 안 불려서 완료 판정이 불필요하게
+    타임아웃까지 미뤄질 수 있다.
+    """
     with _type_counts_lock:
         if _type_counts[ptype] >= max_size:
             logger.warning("Queue full (%s, %d/%d), packet dropped",
                             ptype.name, _type_counts[ptype], max_size)
-            return
+            return False
         _type_counts[ptype] += 1
     try:
         raw = encode_packet(Packet(ptype=ptype, seq=seq.next(), payload=payload))
         p = priority if priority is not None else _PRIORITY.get(ptype, 99)
         q.put_nowait(TxItem(p, ptype, raw, on_dequeue))
+        return True
     except queue.Full:
         with _type_counts_lock:
             _type_counts[ptype] -= 1
         logger.warning("TX queue full: %s dropped", ptype.name)
+        return False
     except Exception as e:
         # encode_packet()이 실패하는 경우까지 포함 — 여기서 카운터를 안 내리면
         # _type_counts가 실제보다 영원히 높게 남아서 큐가 가득 찬 것처럼 보이는
@@ -147,6 +155,7 @@ def enqueue(q: queue.PriorityQueue, ptype: PacketType,
         with _type_counts_lock:
             _type_counts[ptype] -= 1
         logger.error("Encode/enqueue error (%s): %s", ptype.name, e)
+        return False
 
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 def main():

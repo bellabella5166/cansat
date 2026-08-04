@@ -33,7 +33,6 @@ BBOX_DRAW_THRESHOLD = 0.8     # 시각화 이미지에 bbox를 "그리는" 최�
 # ===== 통신 설정 =====
 XBEE_PORT = "/dev/ttyAMA2"    # XBee 포트 (Pi4 기준, dtoverlay=uart2 → GPIO0/1(27/28번 핀)) — 재부팅 후 stty로 실제 값 검증 필요
 XBEE_BAUDRATE = 9600          # XBee 보드레이트
-MAX_RETRY = 5                 # 최대 재전송 횟수
 
 # ===== 시간 기반 대표 이미지 트리거 설정 =====
 # 전원 인가(프로그램 시작) 시점부터 IMAGE_SEND_INTERVAL_S 간격으로 무한 반복해서
@@ -82,7 +81,19 @@ POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
 
 # ===== 자세 제어 설정 =====
 GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick)
-GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
+
+# 서보 각도 제한 (deg, 중립 기준) — roll+pitch 2축을 동시에 구동한 상태로 실측.
+# 각 축을 독립적으로 최대까지 밀면(roll +50.5, pitch +45) 조합에서 구조체에 부딪혀
+# 안전하지 않음이 확인됨 — 대신 두 축을 동시에 극단으로 밀어도 안전하다고 검증된
+# 조합(roll +45.0 / pitch +16.5)을 각 축의 독립 리밋으로 보수적으로 사용한다.
+# 즉 roll이 neutral 근처일 때 pitch가 실제로는 +45까지 더 갈 여지가 있지만,
+# 두 축을 함께 구동하는 이 짐벌 구조상 그 여유를 조합 리밋으로 깎아서 안전 마진을 둠.
+# 음수 방향 조합은 아직 전부 검증되지 않았으니 롤/피치 값을 더 조합해서 재검증 필요.
+GIMBAL_ROLL_LIM_POS  = 45.0   # 롤 + 리밋 (조합 검증됨)
+GIMBAL_ROLL_LIM_NEG  = 29.0   # 롤 - 리밋 (기계적 한계 아님 — 이 이상 기울면 카메라가 지면 대신 구조체를 찍음)
+GIMBAL_PITCH_LIM_POS = 16.5   # 피치 + 리밋 (roll +45와 동시 구동 시 검증됨 — 단독 최대인 +45는 조합 시 충돌)
+GIMBAL_PITCH_LIM_NEG = 10.0   # 피치 - 리밋
+
 GIMBAL_PIN_ROLL    = 18     # 롤 서보 GPIO 핀
 GIMBAL_PIN_PITCH   = 13     # 피치 서보 GPIO 핀
 GIMBAL_DEADBAND    = 0.5

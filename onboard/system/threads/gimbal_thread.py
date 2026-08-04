@@ -6,7 +6,9 @@ import logging
 import time
 from onboard.system.config import (
     GIMBAL_MOCK,
-    GIMBAL_SLEW, GIMBAL_LIM, GIMBAL_DEADBAND,
+    GIMBAL_SLEW, GIMBAL_DEADBAND,
+    GIMBAL_ROLL_LIM_POS, GIMBAL_ROLL_LIM_NEG,
+    GIMBAL_PITCH_LIM_POS, GIMBAL_PITCH_LIM_NEG,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
     GIMBAL_DT,
@@ -17,8 +19,13 @@ logger = logging.getLogger("onboard.gimbal")
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 MOCK          = GIMBAL_MOCK
 SLEW          = GIMBAL_SLEW
-LIM           = GIMBAL_LIM
 DEADBAND      = GIMBAL_DEADBAND
+# 롤/피치를 동시에 극단으로 구동해도 안전하다고 실측 검증된 조합 기준 리밋.
+# 두 축 모두 독립적인 (lo, hi) 대신, 축별로 비대칭 범위를 가짐 — 상세 근거는 config.py 참고.
+LIMITS = {
+    "roll":  (-GIMBAL_ROLL_LIM_NEG,  GIMBAL_ROLL_LIM_POS),
+    "pitch": (-GIMBAL_PITCH_LIM_NEG, GIMBAL_PITCH_LIM_POS),
+}
 PIN_ROLL      = GIMBAL_PIN_ROLL
 PIN_PITCH     = GIMBAL_PIN_PITCH
 NEUTRAL_ROLL  = GIMBAL_NEUTRAL_ROLL
@@ -92,7 +99,8 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
 
             # 서보 제어
             for ax_name, ang in (("roll", g_roll), ("pitch", g_pitch)):
-                target = _clamp(-ang, -LIM, LIM)  # 반대 방향 보상
+                lo, hi = LIMITS[ax_name]
+                target = _clamp(-ang, lo, hi)  # 반대 방향 보상
                 error  = target - cmd[ax_name]
 
                 if abs(error) < DEADBAND:

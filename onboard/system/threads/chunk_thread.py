@@ -45,11 +45,21 @@ def image_chunk_loop(tx_q: queue.PriorityQueue, seq,
                 with remaining_lock:
                     remaining[0] -= 1
 
+            queued_count = 0
+            failed_count = 0
             for chunk_payload in chunks:
-                enqueue_fn(tx_q, PacketType.IMG, chunk_payload, seq, IMG_Q_MAX,
-                           on_dequeue=_mark_dequeued)
-            logger.info("Representative image id=%d → %d chunks queued",
-                        img_id, len(chunks))
+                queued = enqueue_fn(tx_q, PacketType.IMG, chunk_payload, seq, IMG_Q_MAX,
+                                     on_dequeue=_mark_dequeued)
+                if queued:
+                    queued_count += 1
+                else:
+                    failed_count += 1
+                    # 큐 등록에 실패한 청크는 tx_q에 들어가지 않아 on_dequeue가 절대
+                    # 호출되지 않는다 — remaining에서 직접 빼주지 않으면 이미 못 보낸
+                    # 청크 때문에 완료 판정이 send_timeout_s까지 불필요하게 밀린다.
+                    _mark_dequeued()
+            logger.info("Representative image queue result: image_id=%d total=%d "
+                        "queued=%d failed=%d", img_id, len(chunks), queued_count, failed_count)
 
             # 청크가 tx_q에서 실제로 시리얼로 다 빠져나갈 때까지 대기 (재전송 포함).
             # 무한 대기하지 않도록 자체 상한(send_timeout_s)을 둔다 — 지상국과의
