@@ -3,7 +3,7 @@
 # ===== 실행 모드 =====
 MOCK_MODE = False
 COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
-GIMBAL_MOCK = True   # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
+GIMBAL_MOCK = False  # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
 
 # ===== 저장 경로 =====
 import time
@@ -69,14 +69,23 @@ XBEE_CURRENT_MA = 55.6   # XBee 송신 전류 (mA) = 0.2W / 3.6V
 POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
 
 # ===== 자세 제어 설정 =====
-GIMBAL_ALPHA       = 0.96   # 상보필터 상수
-GIMBAL_SLEW        = 8.0    # 최대 각속도 (deg/tick)
-GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
-GIMBAL_PIN_ROLL    = 18     # 롤 서보 GPIO 핀
-GIMBAL_PIN_PITCH   = 13     # 피치 서보 GPIO 핀
+# IMUPLUS 모드(자이로+가속도 융합만 사용, 지자기 융합 끔) — 서보 근처 자성 간섭이
+# NDOF 모드의 지자기 융합을 흔들어 짐벌 진동으로 이어지는 문제를 근본적으로 제거.
+# 같은 BNO055 인스턴스를 sensor_thread(텔레메트리 roll/pitch/yaw)와 공유하므로,
+# 이 모드 전환은 텔레메트리의 yaw(heading)에도 적용돼 지자기 기준 대신 자이로
+# 적분값이 되어 시간이 지나면 서서히 드리프트한다 (합의된 트레이드오프).
+GIMBAL_USE_IMU_MODE = True
 
-GIMBAL_NEUTRAL_ROLL  = 1500  # 롤 서보 중립 펄스 (μs)
-GIMBAL_NEUTRAL_PITCH = 1500  # 피치 서보 중립 펄스 (μs)
+GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick) — 진동 억제를 위해 8.0에서 하향
+GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
+GIMBAL_DEADBAND_DEG = 1.0   # 이 각도(deg) 미만 오차는 무시 (자잘한 흔들림 억제)
+GIMBAL_ANGLE_SMOOTH_ALPHA = 0.85  # roll/pitch EMA 스무딩 계수 (0~1, 클수록 더 부드럽고 느림)
+GIMBAL_US_PER_DEG  = 10.0   # 각도(deg) -> 서보 펄스(μs) 변환 계수
+
+GIMBAL_PIN_ROLL    = 13     # 롤 서보 GPIO 핀
+GIMBAL_PIN_PITCH   = 18     # 피치 서보 GPIO 핀
+
+GIMBAL_NEUTRAL_ROLL  = 1545  # 롤 서보 중립 펄스 (μs)
+GIMBAL_NEUTRAL_PITCH = 1370  # 피치 서보 중립 펄스 (μs)
 
 GIMBAL_DT           = 0.02   # 루프 주기 (초) = 50Hz
-GIMBAL_BIAS_SAMPLES = 150    # 자이로 바이어스 측정 샘플 수 (GIMBAL_DT 기준 3초)

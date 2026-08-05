@@ -7,6 +7,7 @@ import time
 from onboard.system.config import (
     GIMBAL_MOCK,
     GIMBAL_SLEW, GIMBAL_LIM,
+    GIMBAL_DEADBAND_DEG, GIMBAL_ANGLE_SMOOTH_ALPHA, GIMBAL_US_PER_DEG,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
     GIMBAL_DT,
@@ -18,6 +19,9 @@ logger = logging.getLogger("onboard.gimbal")
 MOCK          = GIMBAL_MOCK
 SLEW          = GIMBAL_SLEW
 LIM           = GIMBAL_LIM
+DEADBAND      = GIMBAL_DEADBAND_DEG
+SMOOTH_ALPHA  = GIMBAL_ANGLE_SMOOTH_ALPHA
+US_PER_DEG    = GIMBAL_US_PER_DEG
 PIN_ROLL      = GIMBAL_PIN_ROLL
 PIN_PITCH     = GIMBAL_PIN_PITCH
 NEUTRAL_ROLL  = GIMBAL_NEUTRAL_ROLL
@@ -40,6 +44,11 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
     리셋해서 Sensor 쪽이 쌓아온 캘리브레이션 상태를 날릴 수 있기 때문.
     같은 물리 I2C 버스를 다른 스레드(sensor_thread)와 동시에 쓰므로
     공유 i2c_lock으로 접근을 감싼다.
+
+    IMU 모드(IMUPLUS 전환 여부)는 main()에서 스레드가 하나도 뜨기 전에 한 번만
+    결정적으로 설정한다 — 이 함수 안에서 다시 건드리면 이미 돌고 있는
+    sensor_thread와 경쟁 상태가 생기고, 모드 전환 자체가 BNO055 내부 퓨전
+    상태를 리셋시켜 그 순간 roll/pitch가 잠깐 튈 수 있기 때문.
     """
     if imu is None:
         logger.error("Gimbal: IMU not available (Sensor가 mock 모드이거나 초기화 실패)")
@@ -69,14 +78,22 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             logger.error("Gimbal: lgpio gpiochip open failed: %s", e)
             return
 
-    cmd = {"roll": 0.0, "pitch": 0.0}
-    tick = 0
+    def set_servo(pin: int, us: float) -> None:
+        lgpio.tx_servo(h, pin, int(us), servo_frequency=50)
 
-    logger.info("Gimbal loop started (50Hz)")
+    if not MOCK:
+        set_servo(PIN_ROLL, NEUTRAL_ROLL)
+        set_servo(PIN_PITCH, NEUTRAL_PITCH)
+        time.sleep(0.5)
+
+    cmd = {"roll": 0.0, "pitch": 0.0}
+    smoothed = {"roll": None, "pitch": None}
+    last_log = time.monotonic()
+
+    logger.info("Gimbal loop started (%dHz)", int(1.0 / DT))
 
     while running[0]:
         loop_start = time.monotonic()
-        tick += 1
 
         try:
             with i2c_lock:
@@ -85,45 +102,56 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             if roll is None or pitch is None:
                 raise ValueError("BNO055 euler not ready yet")
 
-            # 45도 축변환 (짐벌 장착 방향)
-            g_roll  = (roll - pitch) * 0.7071
-            g_pitch = (roll + pitch) * 0.7071
+            # roll/pitch에 EMA 스무딩 적용 — 축변환 이전에 걸어야 두 축 노이즈가
+            # 45도 변환으로 서로 섞여 증폭되기 전에 억제된다.
+            if smoothed["roll"] is None:
+                smoothed["roll"], smoothed["pitch"] = roll, pitch
+            else:
+                smoothed["roll"] = SMOOTH_ALPHA * smoothed["roll"] + (1 - SMOOTH_ALPHA) * roll
+                smoothed["pitch"] = SMOOTH_ALPHA * smoothed["pitch"] + (1 - SMOOTH_ALPHA) * pitch
+            rf, pf = smoothed["roll"], smoothed["pitch"]
 
-            # 서보 제어
+            # 45도 축변환 (짐벌 장착 방향)
+            g_roll  = (rf - pf) * 0.7071
+            g_pitch = (rf + pf) * 0.7071
+
             for ax_name, ang in (("roll", g_roll), ("pitch", g_pitch)):
                 target = _clamp(-ang, -LIM, LIM)  # 반대 방향 보상
-                step   = _clamp(target - cmd[ax_name], -SLEW, SLEW)
+                diff = target - cmd[ax_name]
+                # 데드밴드: 오차가 작으면 아예 움직이지 않아 자잘한 흔들림을 억제.
+                step = 0.0 if abs(diff) < DEADBAND else _clamp(diff, -SLEW, SLEW)
                 cmd[ax_name] += step
 
-            servo_roll  = int(NEUTRAL_ROLL  + cmd["roll"]  * 10.0)
-            servo_pitch = int(NEUTRAL_PITCH + cmd["pitch"] * 10.0)
+            servo_roll  = NEUTRAL_ROLL  + cmd["roll"]  * US_PER_DEG
+            servo_pitch = NEUTRAL_PITCH + cmd["pitch"] * US_PER_DEG
 
             # 50Hz 루프에서 매 틱 로그는 과하니 약 1초 간격으로만 downsample.
             # mock 여부와 무관하게 항상 남긴다 — 실제 서보 동작 중에도 사후에
             # "그 순간 roll/pitch가 뭐였는지" 추적할 수 있어야 한다.
-            if tick % 50 == 0:
-                logger.info("Gimbal: roll=%.2f pitch=%.2f -> servo_roll=%d servo_pitch=%d",
-                            g_roll, g_pitch, servo_roll, servo_pitch)
+            if loop_start - last_log > 1.0:
+                logger.info("Gimbal: roll=%.2f pitch=%.2f -> cmd_roll=%.2f cmd_pitch=%.2f",
+                            roll, pitch, cmd["roll"], cmd["pitch"])
+                last_log = loop_start
 
             if not MOCK:
-                lgpio.tx_servo(h, PIN_ROLL,  servo_roll)
-                lgpio.tx_servo(h, PIN_PITCH, servo_pitch)
+                set_servo(PIN_ROLL,  servo_roll)
+                set_servo(PIN_PITCH, servo_pitch)
 
         except Exception as e:
             logger.error("Gimbal loop error: %s", e)
 
         elapsed = time.monotonic() - loop_start
-        time.sleep(max(0.0, DT-elapsed))
+        time.sleep(max(0.0, DT - elapsed))
 
     # 종료 시 서보 중립 복귀 후 PWM 정지
     if MOCK:
         logger.info("Gimbal (mock): servo neutral return skipped")
     else:
-        lgpio.tx_servo(h, PIN_ROLL,  NEUTRAL_ROLL)
-        lgpio.tx_servo(h, PIN_PITCH, NEUTRAL_PITCH)
-        time.sleep(0.3)  # 중립 위치로 복귀할 시간 확보
-        lgpio.tx_servo(h, PIN_ROLL,  0)
-        lgpio.tx_servo(h, PIN_PITCH, 0)
+        set_servo(PIN_ROLL,  NEUTRAL_ROLL)
+        set_servo(PIN_PITCH, NEUTRAL_PITCH)
+        time.sleep(0.5)  # 중립 위치로 복귀할 시간 확보
+        set_servo(PIN_ROLL,  0)
+        set_servo(PIN_PITCH, 0)
         lgpio.gpio_free(h, PIN_ROLL)
         lgpio.gpio_free(h, PIN_PITCH)
         lgpio.gpiochip_close(h)
