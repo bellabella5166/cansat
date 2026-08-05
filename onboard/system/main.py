@@ -248,7 +248,8 @@ def main():
             ),
             threading.Thread(
                 target=nack_loop,
-                args=(serial, tx_q, seq, running, chunk_cache, enqueue, IMG_RETRANSMIT_PRIORITY),
+                args=(serial, tx_q, seq, running, chunk_cache, enqueue, IMG_RETRANSMIT_PRIORITY,
+                        IMAGE_SEND_TIMEOUT_S),
                 daemon=True, name="nack"
             ),
             threading.Thread(

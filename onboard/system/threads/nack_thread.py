@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import threading
 import time
 
 from protocol  import Packet, PacketType, PacketParser
@@ -16,9 +17,37 @@ logger = logging.getLogger("onboard.nack")
 IMG_Q_MAX = 200
 
 
+def _track_retransmit_completion(img_id: int, packet_count: int, total: int,
+                                  remaining: list, remaining_lock: threading.Lock,
+                                  running: list, timeout_s: float) -> None:
+    """재전송 큐에 넣은 청크가 실제로 tx_q를 빠져나가 serial.write()까지 갔는지
+    (전송 성공 여부 자체는 아니고, 온보드가 내보내는 시도를 끝냈는지) 별도
+    스레드에서 추적한다 — nack_loop 본 루프를 여기서 막으면 그 사이 들어오는
+    다른 NACK 패킷 처리가 지연되므로 논블로킹으로 분리한다."""
+    start = time.monotonic()
+    while running[0]:
+        with remaining_lock:
+            left = remaining[0]
+        if left <= 0:
+            logger.info(
+                "Retransmit complete: image_id=%d nack_packet_count=%d "
+                "%d/%d requested chunk(s) sent out over serial",
+                img_id, packet_count, total, total
+            )
+            return
+        if time.monotonic() - start > timeout_s:
+            logger.warning(
+                "Retransmit timed out: image_id=%d nack_packet_count=%d "
+                "%d/%d requested chunk(s) still unsent after %.0fs",
+                img_id, packet_count, total - left, total, timeout_s
+            )
+            return
+        time.sleep(0.05)
+
+
 def nack_loop(serial, tx_q: queue.PriorityQueue, seq,
               running: list, chunk_cache: ChunkCache, enqueue_fn,
-              retransmit_priority: int) -> None:
+              retransmit_priority: int, retransmit_timeout_s: float) -> None:
     """
     지상국(ImageReassembler.poll_nack_targets())이 누락 청크가 많은 이미지 하나를
     NACK 패킷 여러 개로 나눠 보낼 수 있다(패킷당 최대 62개, MAX_MISSING_PER_NACK).
@@ -42,6 +71,12 @@ def nack_loop(serial, tx_q: queue.PriorityQueue, seq,
             continue
 
         if raw:
+            # 헤더(0xAA55)조차 못 잡아 CRC Mismatch 로그도 안 남는 경우를 대비한
+            # 최하위 레벨 기록 — "그 시간대에 시리얼로 뭔가 들어오긴 했다"는
+            # 사실 자체를 남겨서, 로그에 아무 것도 없을 때 그게 "RF 미도달"인지
+            # "패킷으로 조립은 됐는데 그 이후 단계에서 조용히 버려졌는지"를 구분한다.
+            logger.debug("Raw serial bytes received: %d bytes: %s",
+                         len(raw), raw.hex())
             try:
                 for pkt in parser.feed(raw):
                     if pkt.ptype == PacketType.NACK:
@@ -56,15 +91,35 @@ def nack_loop(serial, tx_q: queue.PriorityQueue, seq,
                             nack_packet_counts[img_id] = packet_count
 
                             resend = chunk_cache.get_chunks(img_id, missing)
+                            remaining = [len(resend)]
+                            remaining_lock = threading.Lock()
+
+                            def _mark_dequeued():
+                                with remaining_lock:
+                                    remaining[0] -= 1
+
                             queued_count = 0
                             failed_count = 0
                             for chunk_payload in resend:
                                 queued = enqueue_fn(tx_q, PacketType.IMG, chunk_payload, seq,
-                                                     IMG_Q_MAX, priority=retransmit_priority)
+                                                     IMG_Q_MAX, priority=retransmit_priority,
+                                                     on_dequeue=_mark_dequeued)
                                 if queued:
                                     queued_count += 1
                                 else:
                                     failed_count += 1
+                                    # 큐 등록에 실패한 청크는 on_dequeue가 절대 안 불리므로
+                                    # 직접 빼주지 않으면 완료 판정이 타임아웃까지 밀린다.
+                                    _mark_dequeued()
+
+                            if queued_count > 0:
+                                threading.Thread(
+                                    target=_track_retransmit_completion,
+                                    args=(img_id, packet_count, len(resend),
+                                          remaining, remaining_lock, running,
+                                          retransmit_timeout_s),
+                                    daemon=True, name=f"nack-track-{img_id}-{packet_count}"
+                                ).start()
 
                             logger.info(
                                 "NACK packet received: image_id=%d requested=%d "

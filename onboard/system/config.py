@@ -88,7 +88,20 @@ POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
 GIMBAL_USE_IMU_MODE = True
 
 GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick) — 진동 억제를 위해 8.0에서 하향
-GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
+
+# 서보 각도 제한 (deg, 중립 기준) — roll+pitch 2축을 동시에 구동한 상태로 실측한
+# 값(구 dev-time2 GIMBAL_ROLL/PITCH_LIM_*). 두 축을 독립적으로 최대까지 밀면
+# 구조체에 부딪혀 안전하지 않음이 확인되어, 동시 구동에도 안전한 조합을
+# 각 축의 독립 리밋으로 보수적으로 사용한다. GIMBAL_PIN_ROLL=13(g_roll 직결)/
+# GIMBAL_PIN_PITCH=18(g_pitch 직결) 배선 기준으로, 중립 펄스값(1545/1370)이
+# 실측 당시와 동일하게 대응되도록 이 축에 맞춰 매핑했다 — 축 이름과 실제 GPIO가
+# 예전 dev-time2 코드(핀 이름과 신호를 스왑)와 반대로 짜여 있어 이름만 보고
+# 그대로 복사하면 두 축의 리밋이 뒤바뀌니 주의.
+GIMBAL_ROLL_LIM_POS  = 16.5   # 롤 + 리밋
+GIMBAL_ROLL_LIM_NEG  = 10.0   # 롤 - 리밋
+GIMBAL_PITCH_LIM_POS = 45.0   # 피치 + 리밋
+GIMBAL_PITCH_LIM_NEG = 29.0   # 피치 - 리밋 (기계적 한계 아님 — 이 이상 기울면 카메라가 지면 대신 구조체를 찍음)
+
 GIMBAL_DEADBAND_DEG = 1.0   # 이 각도(deg) 미만 오차는 무시 (자잘한 흔들림 억제)
 GIMBAL_ANGLE_SMOOTH_ALPHA = 0.85  # roll/pitch EMA 스무딩 계수 (0~1, 클수록 더 부드럽고 느림)
 GIMBAL_US_PER_DEG  = 10.0   # 각도(deg) -> 서보 펄스(μs) 변환 계수

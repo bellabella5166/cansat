@@ -6,7 +6,9 @@ import logging
 import time
 from onboard.system.config import (
     GIMBAL_MOCK,
-    GIMBAL_SLEW, GIMBAL_LIM,
+    GIMBAL_SLEW,
+    GIMBAL_ROLL_LIM_POS, GIMBAL_ROLL_LIM_NEG,
+    GIMBAL_PITCH_LIM_POS, GIMBAL_PITCH_LIM_NEG,
     GIMBAL_DEADBAND_DEG, GIMBAL_ANGLE_SMOOTH_ALPHA, GIMBAL_US_PER_DEG,
     GIMBAL_PIN_ROLL, GIMBAL_PIN_PITCH,
     GIMBAL_NEUTRAL_ROLL, GIMBAL_NEUTRAL_PITCH,
@@ -18,7 +20,12 @@ logger = logging.getLogger("onboard.gimbal")
 # ── 설정 ──────────────────────────────────────────────────────────────────────
 MOCK          = GIMBAL_MOCK
 SLEW          = GIMBAL_SLEW
-LIM           = GIMBAL_LIM
+# 실측 검증된 축별 비대칭 리밋 — roll+pitch를 동시에 극단까지 밀어도 구조체와
+# 충돌하지 않는다고 확인된 조합. 축마다 (lo, hi)가 다르므로 분리해서 관리.
+LIMITS = {
+    "roll":  (-GIMBAL_ROLL_LIM_NEG,  GIMBAL_ROLL_LIM_POS),
+    "pitch": (-GIMBAL_PITCH_LIM_NEG, GIMBAL_PITCH_LIM_POS),
+}
 DEADBAND      = GIMBAL_DEADBAND_DEG
 SMOOTH_ALPHA  = GIMBAL_ANGLE_SMOOTH_ALPHA
 US_PER_DEG    = GIMBAL_US_PER_DEG
@@ -116,7 +123,8 @@ def gimbal_loop(running: list, i2c_lock, imu) -> None:
             g_pitch = (rf + pf) * 0.7071
 
             for ax_name, ang in (("roll", g_roll), ("pitch", g_pitch)):
-                target = _clamp(-ang, -LIM, LIM)  # 반대 방향 보상
+                lo, hi = LIMITS[ax_name]
+                target = _clamp(-ang, lo, hi)  # 반대 방향 보상
                 diff = target - cmd[ax_name]
                 # 데드밴드: 오차가 작으면 아예 움직이지 않아 자잘한 흔들림을 억제.
                 step = 0.0 if abs(diff) < DEADBAND else _clamp(diff, -SLEW, SLEW)
