@@ -3,7 +3,7 @@
 # ===== 실행 모드 =====
 MOCK_MODE = False
 COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
-GIMBAL_MOCK = False   # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
+GIMBAL_MOCK = True   # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
 
 # ===== 저장 경로 =====
 import time
@@ -38,7 +38,7 @@ XBEE_BAUDRATE = 9600          # XBee 보드레이트
 # 전원 인가(프로그램 시작) 시점부터 IMAGE_SEND_INTERVAL_S 간격으로 무한 반복해서
 # 대표 이미지 1장씩 전송한다. 고도값을 신뢰하기 어려워 고도 체크포인트 대신
 # 순수 시간 기반으로 전환.
-IMAGE_SEND_INTERVAL_S = 90
+IMAGE_SEND_INTERVAL_S = 60
 
 # ===== 대표 이미지 전송/재전송 설정 =====
 # 대표 이미지 한 장을 다 보내는 데(NACK 재전송 포함) 온보드가 스스로 기다리는

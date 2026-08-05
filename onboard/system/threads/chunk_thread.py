@@ -70,6 +70,9 @@ def image_chunk_loop(tx_q: queue.PriorityQueue, seq,
                 with remaining_lock:
                     left = remaining[0]
                 if left <= 0:
+                    logger.info(
+                        "image_id=%d: all %d chunk(s) sent out over serial (%.1fs)",
+                        img_id, len(chunks), time.monotonic() - start)
                     break
                 if time.monotonic() - start > send_timeout_s:
                     logger.warning(
