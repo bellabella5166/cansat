@@ -54,6 +54,7 @@ from onboard.system.config import (
     IMAGE_SEND_INTERVAL_S, IMAGE_SEND_TIMEOUT_S,
     CHUNK_CACHE_MAX_IMAGES, CHUNK_CACHE_TTL_S,
     XBEE_VOLTAGE_V, XBEE_CURRENT_MA, POWER_REPORT_INTERVAL,
+    GIMBAL_USE_IMU_MODE,
 )
 
 # ── 로깅 ──────────────────────────────────────────────────────────────────────
@@ -181,6 +182,23 @@ def main():
     id_mgr       = IDManager()
     camera       = Camera(mock=MOCK_MODE)
     sensor       = Sensor(mock=MOCK_MODE, i2c_lock=i2c_lock)
+
+    # IMUPLUS 모드(자이로+가속도 융합만 사용, 지자기 융합 끔) — 서보 근처 자성
+    # 간섭이 NDOF 모드의 지자기 융합을 흔들어 짐벌 진동으로 이어지던 문제의
+    # 근본 원인이었다. sensor_thread/gimbal_thread가 시작되어 동시에 이 IMU를
+    # 건드리기 전, 스레드가 하나도 뜨지 않은 이 시점에 한 번만 전환해 경쟁
+    # 상태 없이 결정적으로 적용한다. 같은 인스턴스를 공유하는 sensor_thread의
+    # 텔레메트리 yaw(heading)도 이 모드를 따르게 되어, 지자기 기준 대신 자이로
+    # 적분값이 되고 시간이 지나면 서서히 드리프트한다 (진동 제거를 위해
+    # 감수하기로 한 트레이드오프).
+    if GIMBAL_USE_IMU_MODE and sensor.imu is not None:
+        try:
+            import adafruit_bno055
+            sensor.imu.mode = adafruit_bno055.IMUPLUS_MODE
+            logger.info("IMU mode -> IMUPLUS (지자기 융합 끔)")
+        except Exception as e:
+            logger.error("IMU mode switch failed: %s", e)
+
     validator    = ImageValidator()
     quality      = ImageQuality()
     preprocessor = ImagePreprocess()

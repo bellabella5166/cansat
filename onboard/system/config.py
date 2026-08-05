@@ -3,7 +3,7 @@
 # ===== 실행 모드 =====
 MOCK_MODE = False
 COMM_MOCK = False  # 로컬 테스트: True / Pi4 실제 실행: False
-GIMBAL_MOCK = True    # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함 — 테스트용 임시 True, 끝나면 False로 되돌릴 것
+GIMBAL_MOCK = False   # True면 서보(GPIO/lgpio) 제어를 건너뛰고 로그만 출력. IMU 읽기는 이 값과 무관하게 항상 실제 센서에서 함
 
 # ===== 저장 경로 =====
 import time
@@ -80,41 +80,21 @@ XBEE_CURRENT_MA = 55.6   # XBee 송신 전류 (mA) = 0.2W / 3.6V
 POWER_REPORT_INTERVAL = 10.0  # POWER 패킷 송신 주기 (초)
 
 # ===== 자세 제어 설정 =====
-GIMBAL_SLEW        = 5.0    # 최대 각속도 (deg/tick) — 데드밴드 밖에서는 이 속도로 확 움직임
+# IMUPLUS 모드(자이로+가속도 융합만 사용, 지자기 융합 끔) — 서보 근처 자성 간섭이
+# NDOF 모드의 지자기 융합을 흔들어 짐벌 진동으로 이어지는 문제를 근본적으로 제거.
+# 같은 BNO055 인스턴스를 sensor_thread(텔레메트리 roll/pitch/yaw)와 공유하므로,
+# 이 모드 전환은 텔레메트리의 yaw(heading)에도 적용돼 지자기 기준 대신 자이로
+# 적분값이 되어 시간이 지나면 서서히 드리프트한다 (합의된 트레이드오프).
+GIMBAL_USE_IMU_MODE = True
 
-# BNO055 fused roll/pitch에 거는 저역통과(EMA) 필터 계수. 데드밴드는
-# "언제 멈출지"만 다루는 반면, 이건 target 자체가 센서 노이즈로 흔들리는 걸
-# 애초에 줄인다 — 값이 클수록(1에 가까울수록) 더 부드럽지만 반응이 느려짐.
-# filtered = ALPHA * filtered_prev + (1-ALPHA) * raw
-GIMBAL_FILTER_ALPHA = 0.8
+GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick) — 진동 억제를 위해 8.0에서 하향
+GIMBAL_LIM         = 20.0   # 서보 각도 제한 (deg)
+GIMBAL_DEADBAND_DEG = 1.0   # 이 각도(deg) 미만 오차는 무시 (자잘한 흔들림 억제)
+GIMBAL_ANGLE_SMOOTH_ALPHA = 0.85  # roll/pitch EMA 스무딩 계수 (0~1, 클수록 더 부드럽고 느림)
+GIMBAL_US_PER_DEG  = 10.0   # 각도(deg) -> 서보 펄스(μs) 변환 계수
 
-# 재조준 판단 주기(초). IMU 읽기/필터링/서보 신호(PWM) 유지는 계속 50Hz로
-# 돌지만, "새 목표로 움직일지" 판단은 이 주기로만 한다 — CAMERA_FPS=1이라
-# 카메라가 초당 1장만 찍으므로, 그보다 빠르게 재조준해봐야 그 사이엔 찍히는
-# 프레임이 없어 의미가 없다. MG90 같은 저가 서보를 "계속 미세 추적"이 아니라
-# "필요할 때만 굵직하게 재조준"하는 용도로 쓰기 위한 조치.
-GIMBAL_REPOSITION_INTERVAL_S = 1.0
-
-# 서보 각도 제한 (deg, 중립 기준) — roll+pitch 2축을 동시에 구동한 상태로 실측.
-# 각 축을 독립적으로 최대까지 밀면(roll +50.5, pitch +45) 조합에서 구조체에 부딪혀
-# 안전하지 않음이 확인됨 — 대신 두 축을 동시에 극단으로 밀어도 안전하다고 검증된
-# 조합(roll +45.0 / pitch +16.5)을 각 축의 독립 리밋으로 보수적으로 사용한다.
-# 즉 roll이 neutral 근처일 때 pitch가 실제로는 +45까지 더 갈 여지가 있지만,
-# 두 축을 함께 구동하는 이 짐벌 구조상 그 여유를 조합 리밋으로 깎아서 안전 마진을 둠.
-# 음수 방향 조합은 아직 전부 검증되지 않았으니 롤/피치 값을 더 조합해서 재검증 필요.
-GIMBAL_ROLL_LIM_POS  = 45.0   # 롤 + 리밋 (조합 검증됨)
-GIMBAL_ROLL_LIM_NEG  = 29.0   # 롤 - 리밋 (기계적 한계 아님 — 이 이상 기울면 카메라가 지면 대신 구조체를 찍음)
-GIMBAL_PITCH_LIM_POS = 16.5   # 피치 + 리밋 (roll +45와 동시 구동 시 검증됨 — 단독 최대인 +45는 조합 시 충돌)
-GIMBAL_PITCH_LIM_NEG = 10.0   # 피치 - 리밋
-
-GIMBAL_PIN_ROLL    = 18     # 롤 서보 GPIO 핀
-GIMBAL_PIN_PITCH   = 13     # 피치 서보 GPIO 핀
-
-# 축별 데드밴드 (deg) — 이 이하 오차는 무시하고 아예 멈춰서, "확확 바뀌었다가
-# 딱 정지"를 의도대로 만든다. pitch는 가동범위(26.5도)가 roll(74도)보다 훨씬
-# 좁아서 같은 5도를 그대로 쓰면 범위의 20%가 죽어버리므로 축별로 분리.
-GIMBAL_ROLL_DEADBAND  = 5.0
-GIMBAL_PITCH_DEADBAND = 2.5
+GIMBAL_PIN_ROLL    = 13     # 롤 서보 GPIO 핀
+GIMBAL_PIN_PITCH   = 18     # 피치 서보 GPIO 핀
 
 GIMBAL_NEUTRAL_ROLL  = 1545  # 롤 서보 중립 펄스 (μs)
 GIMBAL_NEUTRAL_PITCH = 1370  # 피치 서보 중립 펄스 (μs)
