@@ -89,18 +89,16 @@ GIMBAL_USE_IMU_MODE = True
 
 GIMBAL_SLEW        = 2.0    # 최대 각속도 (deg/tick) — 진동 억제를 위해 8.0에서 하향
 
-# 서보 각도 제한 (deg, 중립 기준) — roll+pitch 2축을 동시에 구동한 상태로 실측한
-# 값(구 dev-time2 GIMBAL_ROLL/PITCH_LIM_*). 두 축을 독립적으로 최대까지 밀면
-# 구조체에 부딪혀 안전하지 않음이 확인되어, 동시 구동에도 안전한 조합을
-# 각 축의 독립 리밋으로 보수적으로 사용한다. GIMBAL_PIN_ROLL=13(g_roll 직결)/
-# GIMBAL_PIN_PITCH=18(g_pitch 직결) 배선 기준으로, 중립 펄스값(1545/1370)이
-# 실측 당시와 동일하게 대응되도록 이 축에 맞춰 매핑했다 — 축 이름과 실제 GPIO가
-# 예전 dev-time2 코드(핀 이름과 신호를 스왑)와 반대로 짜여 있어 이름만 보고
-# 그대로 복사하면 두 축의 리밋이 뒤바뀌니 주의.
-GIMBAL_ROLL_LIM_POS  = 16.5   # 롤 + 리밋
-GIMBAL_ROLL_LIM_NEG  = 10.0   # 롤 - 리밋
-GIMBAL_PITCH_LIM_POS = 45.0   # 피치 + 리밋
-GIMBAL_PITCH_LIM_NEG = 29.0   # 피치 - 리밋 (기계적 한계 아님 — 이 이상 기울면 카메라가 지면 대신 구조체를 찍음)
+# 서보 각도 제한 (deg, 중립 기준). 원래는 실측된 축별 비대칭 리밋(roll -10/+16.5,
+# pitch -29/+45, 구 dev-time2 GIMBAL_ROLL/PITCH_LIM_*)을 썼는데, 그 좁아진
+# 리밋(특히 롤 40°->26.5°) 근처에서 클램프에 계속 부딪히며 지지직거리는 진동이
+# 재발해 — 원인 확인을 위해 gimbal_test.py와 동일한 대칭 ±20도로 임시 원복.
+# 진동이 사라지면 리밋 폭 자체가 원인으로 확정되고, 구조체 충돌 안전은 소프트웨어
+# 리밋이 아닌 다른 방식(기구적 스톱 등)으로 별도 해결 필요.
+GIMBAL_ROLL_LIM_POS  = 20.0   # 롤 + 리밋
+GIMBAL_ROLL_LIM_NEG  = 20.0   # 롤 - 리밋
+GIMBAL_PITCH_LIM_POS = 20.0   # 피치 + 리밋
+GIMBAL_PITCH_LIM_NEG = 20.0   # 피치 - 리밋
 
 GIMBAL_DEADBAND_DEG = 1.0   # 이 각도(deg) 미만 오차는 무시 (자잘한 흔들림 억제)
 GIMBAL_ANGLE_SMOOTH_ALPHA = 0.85  # roll/pitch EMA 스무딩 계수 (0~1, 클수록 더 부드럽고 느림)
